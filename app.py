@@ -9,7 +9,7 @@ import streamlit as st
 
 from ruleflow.lexer import Lexer, LexerError
 from ruleflow.parser import Parser, ParserError
-from ruleflow.semantic import SemanticAnalyzer
+from ruleflow.semantic import SemanticAnalyzer, SemanticError
 from ruleflow.ir import IRGenerator
 from ruleflow.optimizer import Optimizer
 from ruleflow.codegen import CodeGenerator
@@ -46,6 +46,28 @@ if selected_example_name != "Custom Input" and selected_example_name in example_
     except Exception as e:
         st.sidebar.error(f"Error reading file: {e}")
 
+st.sidebar.markdown("---")
+st.sidebar.header("🏷️ External Input Variables")
+default_inputs = (
+    "gpa: DECIMAL\nattendance: INTEGER"
+    if "student_eligibility" in selected_example_name
+    else ("cart_total: DECIMAL\ncustomer_tier: STRING" if "discount_calculation" in selected_example_name else "")
+)
+inputs_text = st.sidebar.text_area(
+    "Define Inputs (name: TYPE)",
+    value=default_inputs,
+    height=80,
+    help="One per line, e.g.:\ngpa: DECIMAL\nattendance: INTEGER",
+)
+input_types = {}
+for line in inputs_text.strip().splitlines():
+    if ":" in line:
+        name, typ = line.split(":", 1)
+        name = name.strip()
+        typ = typ.strip().upper()
+        if name and typ:
+            input_types[name] = typ
+
 source_code = st.text_area(
     "RuleFlow Source Code",
     value=default_code,
@@ -80,7 +102,7 @@ if compile_btn:
         ast = parser.parse()
 
         # 3. Semantic Analysis
-        analyzer = SemanticAnalyzer(ast)
+        analyzer = SemanticAnalyzer(ast, input_types=input_types)
         is_valid = analyzer.analyze()
 
         # 4. IR Generation
@@ -115,6 +137,18 @@ if compile_btn:
             st.code(ast.pretty(), language="text")
             with st.expander("View JSON AST Structure"):
                 st.json(ast.to_dict())
+
+        with tabs[2]:
+            st.markdown("#### Semantic Analysis & Type Checking")
+            st.info("Module: `ruleflow.semantic` - Validates types, symbols, and scope rules.")
+            st.success("✅ Semantic analysis passed! All types, symbols, and scopes are valid.")
+            st.markdown("**Symbol Table:**")
+            if analyzer.symbol_table:
+                st.dataframe(list(analyzer.symbol_table.values()), use_container_width=True)
+            else:
+                st.info("No variables in symbol table.")
+            with st.expander("View Raw Symbol Table JSON"):
+                st.json(analyzer.symbol_table)
     except LexerError as lex_err:
         st.error(f"❌ {lex_err}")
         with tabs[0]:
@@ -123,13 +157,10 @@ if compile_btn:
         st.error(f"❌ {parse_err}")
         with tabs[1]:
             st.error(f"Syntax Error Encountered:\n\n{parse_err}")
-
-    with tabs[2]:
-        st.markdown("#### Semantic Analysis")
-        st.info("Module: `ruleflow.semantic` - Validates types, symbols, and scope rules.")
-        st.write(f"Validation Status: {'Passed' if is_valid else 'Failed'}")
-        st.write("Symbol Table:")
-        st.json(analyzer.symbol_table if analyzer.symbol_table else {"status": "Placeholder (Empty symbol table)"})
+    except SemanticError as sem_err:
+        st.error(f"❌ {sem_err}")
+        with tabs[2]:
+            st.error(f"Semantic Error Encountered:\n\n{sem_err}")
 
     with tabs[3]:
         st.markdown("#### Intermediate Code Generation (IR)")

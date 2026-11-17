@@ -111,12 +111,55 @@ Once running, open your browser at the indicated local URL (typically `http://lo
 
 ---
 
+## 🔍 Module 3: Semantic Analysis and Type Checking
+
+### What Semantic Analysis Does
+Semantic analysis is the third phase of compilation. It checks context-sensitive rules that grammar alone cannot enforce:
+- Resolves identifier scopes and verifies variables are defined before use.
+- Performs definite assignment analysis across `IF-ELSE` branches.
+- Type checks operations and enforces strict operand compatibility.
+- Detects static runtime hazards like division or modulo by literal zero.
+
+### Supported Data Types
+- `INTEGER`: Whole numbers (e.g. `42`, `0`, `-15`).
+- `DECIMAL`: Floating-point numbers (e.g. `3.14`, `0.5`).
+- `STRING`: Quoted character sequences (e.g. `"Eligible"`).
+- `BOOLEAN`: Truth values (`True`, `False`) resulting from relational or logical expressions.
+
+### The Symbol Table Concept
+The `SymbolTable` maintains scoped records of all known variables:
+- **Variable Name**: Identifier key.
+- **Data Type**: `INTEGER`, `DECIMAL`, `STRING`, or `BOOLEAN`.
+- **Kind**: External `Input` vs `Internal` assignment.
+- **Source Location**: Line and column where defined.
+- **Rule Scope Isolation**: Variables assigned inside one rule do not leak into another rule.
+
+### Type Checking & Inference Rules
+1. **Arithmetic (`+`, `-`, `*`, `/`, `%`)**: Requires numeric operands (`INTEGER` or `DECIMAL`).
+   - `INTEGER op INTEGER -> INTEGER` (for `+`, `-`, `*`, `%`)
+   - `INTEGER / INTEGER -> DECIMAL` (true division)
+   - Mixing `INTEGER` and `DECIMAL` widens to `DECIMAL`.
+   - Division or modulo by literal zero raises a static `SemanticError`.
+2. **Relational (`<`, `<=`, `>`, `>=`)**: Requires numeric operands; yields `BOOLEAN`.
+3. **Equality (`==`, `!=`)**: Requires compatible operand types; yields `BOOLEAN`.
+4. **Logical (`AND`, `OR`, `NOT`)**: Operands must be `BOOLEAN`; yields `BOOLEAN`.
+5. **Conditionals (`IF`)**: Condition must evaluate to `BOOLEAN`.
+6. **Definite Assignment**:
+   - Variables assigned in both branches of an `IF-ELSE` remain defined after the `IF`.
+   - Variables assigned only in the `THEN` branch (or without `ELSE`) are not considered definitely assigned after the `IF`.
+
+---
+
 ## 🧪 Running Tests
 
-Verify the structure and initial modules using `pytest`:
+Verify the compiler modules using `pytest`:
 
 ```bash
-pytest
+# Run semantic tests only
+.\venv\Scripts\pytest.exe tests/test_semantic.py -v
+
+# Run entire test suite (Lexer + Parser + Semantic + Structure)
+.\venv\Scripts\pytest.exe -v
 ```
 
 ---
@@ -127,7 +170,7 @@ pytest
 - [x] Streamlit UI pipeline visualizer
 - [x] **Module 1: Lexical Analysis (Lexer, Tokens, Line/Column tracking, Error handling)**
 - [x] **Module 2: Syntax Analysis & Abstract Syntax Tree (Parser & AST, Grammar, Error handling)**
-- [ ] Module 3: Semantic Analysis & Symbol Table Management
+- [x] **Module 3: Semantic Analysis & Symbol Table Management (Types, Scopes, Definite Assignment)**
 - [ ] Module 4: Intermediate Code Generation (IR)
 - [ ] Module 5: Code Optimization Passes
 - [ ] Module 6: Target Code Generation
