@@ -1,0 +1,7 @@
+// Example: Simple greeting rule in RuleFlow
+RULE GreetUser:
+    IF user_age >= 18 THEN
+        greeting = "Welcome adult user"
+    ELSE
+        greeting = "Welcome young user"
+    END

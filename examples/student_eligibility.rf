@@ -1,0 +1,7 @@
+// RuleFlow Student Eligibility Rule
+RULE StudentEligibility:
+    IF gpa >= 3.5 AND attendance >= 75 THEN
+        status = "Eligible"
+    ELSE
+        status = "Not Eligible"
+    END

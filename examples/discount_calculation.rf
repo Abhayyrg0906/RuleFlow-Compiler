@@ -1,0 +1,6 @@
+// Example: Business rule calculation in RuleFlow
+RULE ApplyDiscount:
+    IF cart_total >= 100 AND customer_tier == "VIP" THEN
+        discount = cart_total * 0.20
+        final_total = cart_total - discount
+    END

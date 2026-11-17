@@ -1,0 +1,160 @@
+"""Streamlit User Interface for RuleFlow Compiler.
+
+Provides an interactive dashboard to explore each phase of the compilation
+pipeline from source code to execution.
+"""
+
+from pathlib import Path
+import streamlit as st
+
+from ruleflow.lexer import Lexer, LexerError
+from ruleflow.parser import Parser, ParserError
+from ruleflow.semantic import SemanticAnalyzer
+from ruleflow.ir import IRGenerator
+from ruleflow.optimizer import Optimizer
+from ruleflow.codegen import CodeGenerator
+from ruleflow.execution import Executor
+
+st.set_page_config(
+    page_title="RuleFlow Compiler",
+    page_icon="⚙️",
+    layout="wide",
+)
+
+st.title("⚙️ RuleFlow Compiler")
+st.caption("A modular, educational compiler for rule-based workflows")
+
+# Sidebar - Example Selector & Information
+st.sidebar.header("📁 Source Code")
+
+examples_dir = Path(__file__).parent / "examples"
+example_files = list(examples_dir.glob("*.rf")) if examples_dir.exists() else []
+example_options = {f.name: f for f in example_files}
+
+selected_example_name = st.sidebar.selectbox(
+    "Load an example",
+    options=["Custom Input"] + list(example_options.keys()),
+    index=0,
+)
+
+default_code = "// Write your RuleFlow code here\nrule SampleRule:\n    when:\n        score >= 80\n    then:\n        status = \"Approved\"\n"
+
+if selected_example_name != "Custom Input" and selected_example_name in example_options:
+    selected_path = example_options[selected_example_name]
+    try:
+        default_code = selected_path.read_text(encoding="utf-8")
+    except Exception as e:
+        st.sidebar.error(f"Error reading file: {e}")
+
+source_code = st.text_area(
+    "RuleFlow Source Code",
+    value=default_code,
+    height=200,
+    help="Enter rule-based code to pass through the compiler pipeline.",
+)
+
+# Pipeline Control
+compile_btn = st.button("🚀 Run Compiler Pipeline", type="primary")
+
+st.markdown("---")
+st.subheader("🔍 Compiler Pipeline Stages")
+
+tabs = st.tabs([
+    "1. Lexer (Tokens)",
+    "2. Parser & AST",
+    "3. Semantic Analysis",
+    "4. Intermediate Code (IR)",
+    "5. Optimization",
+    "6. Code Generation",
+    "7. Execution",
+])
+
+if compile_btn:
+    try:
+        # 1. Lexing
+        lexer = Lexer(source_code)
+        tokens = lexer.tokenize()
+
+        # 2. Parsing & AST
+        parser = Parser(tokens)
+        ast = parser.parse()
+
+        # 3. Semantic Analysis
+        analyzer = SemanticAnalyzer(ast)
+        is_valid = analyzer.analyze()
+
+        # 4. IR Generation
+        ir_gen = IRGenerator(ast)
+        ir_instructions = ir_gen.generate()
+
+        # 5. Optimization
+        optimizer = Optimizer(ir_instructions)
+        optimized_ir = optimizer.optimize()
+
+        # 6. Code Generation
+        codegen = CodeGenerator(optimized_ir)
+        target_code = codegen.generate()
+
+        # 7. Execution
+        executor = Executor(target_code)
+        execution_result = executor.execute()
+
+        with tabs[0]:
+            st.markdown("#### Lexical Analysis")
+            st.info("Module: `ruleflow.lexer` - Tokenizes source text into discrete tokens.")
+            st.success(f"Successfully generated {len(tokens)} token(s).")
+            st.dataframe([t.to_dict() for t in tokens], use_container_width=True)
+            with st.expander("View Raw Token Representation"):
+                st.code("\n".join(repr(t) for t in tokens), language="text")
+
+        with tabs[1]:
+            st.markdown("#### Syntax Analysis (Abstract Syntax Tree)")
+            st.info("Module: `ruleflow.parser` & `ruleflow.ast` - Constructs the AST hierarchy.")
+            st.success("Successfully generated Abstract Syntax Tree.")
+            st.markdown("**Indented AST View:**")
+            st.code(ast.pretty(), language="text")
+            with st.expander("View JSON AST Structure"):
+                st.json(ast.to_dict())
+    except LexerError as lex_err:
+        st.error(f"❌ {lex_err}")
+        with tabs[0]:
+            st.error(f"Lexical Error Encountered:\n\n{lex_err}")
+    except ParserError as parse_err:
+        st.error(f"❌ {parse_err}")
+        with tabs[1]:
+            st.error(f"Syntax Error Encountered:\n\n{parse_err}")
+
+    with tabs[2]:
+        st.markdown("#### Semantic Analysis")
+        st.info("Module: `ruleflow.semantic` - Validates types, symbols, and scope rules.")
+        st.write(f"Validation Status: {'Passed' if is_valid else 'Failed'}")
+        st.write("Symbol Table:")
+        st.json(analyzer.symbol_table if analyzer.symbol_table else {"status": "Placeholder (Empty symbol table)"})
+
+    with tabs[3]:
+        st.markdown("#### Intermediate Code Generation (IR)")
+        st.info("Module: `ruleflow.ir` - Produces intermediate three-address code / quadruples.")
+        st.write("IR Instructions:")
+        st.json(ir_instructions if ir_instructions else {"status": "Placeholder (No IR generated yet)"})
+
+    with tabs[4]:
+        st.markdown("#### Code Optimization")
+        st.info("Module: `ruleflow.optimizer` - Applies machine-independent optimizations.")
+        st.write("Optimized IR:")
+        st.json(optimized_ir if optimized_ir else {"status": "Placeholder (No optimizations applied yet)"})
+
+    with tabs[5]:
+        st.markdown("#### Target Code Generation")
+        st.info("Module: `ruleflow.codegen` - Emits target code or bytecode.")
+        st.write("Target Code:")
+        st.json(target_code if target_code else {"status": "Placeholder (No target code generated yet)"})
+
+    with tabs[6]:
+        st.markdown("#### Execution / Runtime Output")
+        st.info("Module: `ruleflow.execution` - Virtual execution environment or runtime.")
+        st.write("Execution Result:")
+        st.json(execution_result)
+else:
+    for i, tab in enumerate(tabs):
+        with tab:
+            st.info(f"Click **'Run Compiler Pipeline'** above to trace this stage through the RuleFlow compiler.")
