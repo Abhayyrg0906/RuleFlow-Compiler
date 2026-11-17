@@ -150,15 +150,46 @@ The `SymbolTable` maintains scoped records of all known variables:
 
 ---
 
+## ⚙️ Module 4: Intermediate Code Generation and Optimization
+
+### What Intermediate Representation (IR) Means
+The Intermediate Representation serves as a bridge between the front-end (Lexer, Parser, Semantic Analyzer) and the back-end (Target Code Generator). It linearizes the hierarchical AST into an architecture-independent instruction stream that is easy to optimize.
+
+### Three-Address Code (TAC)
+RuleFlow uses **Three-Address Code**, where each instruction has at most one operator and at most three operands/addresses (two sources and one target):
+- **Assignment**: `x = 10`
+- **Binary Operation**: `t1 = 20 * 2`
+- **Unary Operation**: `t2 = -x`
+- **Conditional Jump**: `IF_FALSE cond GOTO L_else`
+- **Unconditional Jump**: `GOTO L_end`
+- **Label**: `LABEL L_else`
+
+### Temporary Variables and Control Flow
+- Compiler-generated temporary variables (`t1`, `t2`, `t3`, ...) store intermediate results of compound expressions in strict evaluation order.
+- Conditional branches (`IF-THEN`, `IF-THEN-ELSE`) and short-circuit boolean logic (`AND`, `OR`) are translated into conditional jumps and unique destination labels.
+
+### Optimization Passes
+1. **Constant Propagation**:
+   - Tracks known constants and replaces variable usages with their literal values.
+   - *Safety Rule*: Constants are safely cleared across branch boundaries (`LABEL`, `GOTO`, `IF_FALSE`) to prevent invalid propagation across control-flow joins.
+2. **Constant Folding**:
+   - Statically evaluates compile-time operations (arithmetic, comparisons, equality, logic).
+   - Division and modulo by zero are safely guarded without crashing.
+3. **Dead Code Elimination (DCE)**:
+   - Removes unused compiler temporaries (`t1`, `t2`, ...) that have no observable side effects.
+   - *Safety Rule*: Named RuleFlow variables and control-flow labels/jumps are strictly preserved.
+
+---
+
 ## 🧪 Running Tests
 
 Verify the compiler modules using `pytest`:
 
 ```bash
-# Run semantic tests only
-.\venv\Scripts\pytest.exe tests/test_semantic.py -v
+# Run Module 4 IR and Optimizer tests only
+.\venv\Scripts\pytest.exe tests/test_ir.py tests/test_optimizer.py -v
 
-# Run entire test suite (Lexer + Parser + Semantic + Structure)
+# Run entire test suite (Lexer + Parser + Semantic + IR + Optimizer + Structure)
 .\venv\Scripts\pytest.exe -v
 ```
 
@@ -171,7 +202,6 @@ Verify the compiler modules using `pytest`:
 - [x] **Module 1: Lexical Analysis (Lexer, Tokens, Line/Column tracking, Error handling)**
 - [x] **Module 2: Syntax Analysis & Abstract Syntax Tree (Parser & AST, Grammar, Error handling)**
 - [x] **Module 3: Semantic Analysis & Symbol Table Management (Types, Scopes, Definite Assignment)**
-- [ ] Module 4: Intermediate Code Generation (IR)
-- [ ] Module 5: Code Optimization Passes
-- [ ] Module 6: Target Code Generation
-- [ ] Module 7: Execution Engine / Runtime VM
+- [x] **Module 4: Intermediate Code Generation (TAC) & Optimization (Folding, Propagation, DCE)**
+- [ ] Module 5: Target Code Generation
+- [ ] Module 6: Execution Engine / Runtime VM

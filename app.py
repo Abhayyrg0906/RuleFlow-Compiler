@@ -37,7 +37,7 @@ selected_example_name = st.sidebar.selectbox(
     index=0,
 )
 
-default_code = "// Write your RuleFlow code here\nrule SampleRule:\n    when:\n        score >= 80\n    then:\n        status = \"Approved\"\n"
+default_code = "// Write your RuleFlow code here\nRULE SampleRule:\n    IF score >= 80 THEN\n        status = \"Approved\"\n    END\n"
 
 if selected_example_name != "Custom Input" and selected_example_name in example_options:
     selected_path = example_options[selected_example_name]
@@ -105,7 +105,7 @@ if compile_btn:
         analyzer = SemanticAnalyzer(ast, input_types=input_types)
         is_valid = analyzer.analyze()
 
-        # 4. IR Generation
+        # 4. IR Generation (only after semantic analysis passes)
         ir_gen = IRGenerator(ast)
         ir_instructions = ir_gen.generate()
 
@@ -113,11 +113,11 @@ if compile_btn:
         optimizer = Optimizer(ir_instructions)
         optimized_ir = optimizer.optimize()
 
-        # 6. Code Generation
+        # 6. Code Generation (placeholder)
         codegen = CodeGenerator(optimized_ir)
         target_code = codegen.generate()
 
-        # 7. Execution
+        # 7. Execution (placeholder)
         executor = Executor(target_code)
         execution_result = executor.execute()
 
@@ -149,6 +149,53 @@ if compile_btn:
                 st.info("No variables in symbol table.")
             with st.expander("View Raw Symbol Table JSON"):
                 st.json(analyzer.symbol_table)
+
+        with tabs[3]:
+            st.markdown("#### Intermediate Code Generation (Three-Address Code)")
+            st.info("Module: `ruleflow.ir` - Produces machine-independent linear Three-Address Code.")
+            st.success(f"Generated {len(ir_instructions)} Three-Address Code instruction(s).")
+            st.markdown("**Unoptimized TAC:**")
+            st.code("\n".join(str(inst) for inst in ir_instructions), language="text")
+            with st.expander("View Structured Instruction Table"):
+                st.dataframe([inst.to_dict() for inst in ir_instructions], use_container_width=True)
+
+        with tabs[4]:
+            st.markdown("#### Code Optimization (TAC)")
+            st.info("Module: `ruleflow.optimizer` - Performs Constant Propagation, Constant Folding, and Dead Temporary Elimination.")
+            diff = len(ir_instructions) - len(optimized_ir)
+            st.success(f"Optimization complete: {len(optimized_ir)} instructions remaining ({diff} eliminated).")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Before (Raw TAC):**")
+                st.code("\n".join(str(inst) for inst in ir_instructions), language="text")
+            with col2:
+                st.markdown("**After (Optimized TAC):**")
+                st.code("\n".join(str(inst) for inst in optimized_ir), language="text")
+
+            st.markdown("**Optimization Log:**")
+            opt_log = optimizer.get_log()
+            if opt_log:
+                for entry in opt_log:
+                    st.write(f"- `{entry}`")
+            else:
+                st.info("No constant folding or dead code elimination opportunities detected.")
+
+            with st.expander("View Optimized Instruction Table"):
+                st.dataframe([inst.to_dict() for inst in optimized_ir], use_container_width=True)
+
+        with tabs[5]:
+            st.markdown("#### Target Code Generation")
+            st.info("Module: `ruleflow.codegen` - Emits target code or bytecode.")
+            st.write("Target Code:")
+            st.json(target_code if target_code else {"status": "Placeholder (Pending Module 5)"})
+
+        with tabs[6]:
+            st.markdown("#### Execution / Runtime Output")
+            st.info("Module: `ruleflow.execution` - Virtual execution environment or runtime.")
+            st.write("Execution Result:")
+            st.json(execution_result)
+
     except LexerError as lex_err:
         st.error(f"❌ {lex_err}")
         with tabs[0]:
@@ -161,31 +208,9 @@ if compile_btn:
         st.error(f"❌ {sem_err}")
         with tabs[2]:
             st.error(f"Semantic Error Encountered:\n\n{sem_err}")
-
-    with tabs[3]:
-        st.markdown("#### Intermediate Code Generation (IR)")
-        st.info("Module: `ruleflow.ir` - Produces intermediate three-address code / quadruples.")
-        st.write("IR Instructions:")
-        st.json(ir_instructions if ir_instructions else {"status": "Placeholder (No IR generated yet)"})
-
-    with tabs[4]:
-        st.markdown("#### Code Optimization")
-        st.info("Module: `ruleflow.optimizer` - Applies machine-independent optimizations.")
-        st.write("Optimized IR:")
-        st.json(optimized_ir if optimized_ir else {"status": "Placeholder (No optimizations applied yet)"})
-
-    with tabs[5]:
-        st.markdown("#### Target Code Generation")
-        st.info("Module: `ruleflow.codegen` - Emits target code or bytecode.")
-        st.write("Target Code:")
-        st.json(target_code if target_code else {"status": "Placeholder (No target code generated yet)"})
-
-    with tabs[6]:
-        st.markdown("#### Execution / Runtime Output")
-        st.info("Module: `ruleflow.execution` - Virtual execution environment or runtime.")
-        st.write("Execution Result:")
-        st.json(execution_result)
+    except Exception as err:
+        st.error(f"❌ Pipeline Error: {err}")
 else:
     for i, tab in enumerate(tabs):
         with tab:
-            st.info(f"Click **'Run Compiler Pipeline'** above to trace this stage through the RuleFlow compiler.")
+            st.info("Click **'Run Compiler Pipeline'** above to trace this stage through the RuleFlow compiler.")

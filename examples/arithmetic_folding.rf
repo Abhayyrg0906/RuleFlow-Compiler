@@ -1,0 +1,6 @@
+// Example: Arithmetic calculations and constant folding
+RULE Calculation:
+    result = 10 + 20 * 2
+    base = 100
+    total = base + 50
+END
