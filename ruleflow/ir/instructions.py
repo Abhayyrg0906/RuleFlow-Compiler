@@ -21,6 +21,13 @@ class Constant:
 
     def __eq__(self, other: Any) -> bool:
         if isinstance(other, Constant):
+            # Ensure boolean values are not treated as equal to integer 1 or 0
+            if isinstance(self.value, bool) or isinstance(other.value, bool):
+                return (
+                    isinstance(self.value, bool)
+                    and isinstance(other.value, bool)
+                    and self.value == other.value
+                )
             return self.value == other.value
         return False
 

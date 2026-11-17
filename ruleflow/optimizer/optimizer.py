@@ -280,6 +280,11 @@ class Optimizer:
         # Equality
         if op in ("==", "!="):
             # Safe equality comparison between compatible types
+            # Do not equate booleans with numbers or strings with numbers
+            if isinstance(left, bool) != isinstance(right, bool):
+                return None
+            if isinstance(left, str) != isinstance(right, str):
+                return None
             try:
                 if op == "==":
                     return left == right
@@ -345,6 +350,11 @@ class Optimizer:
             if isinstance(inst, (AssignInstruction, BinaryOpInstruction, UnaryOpInstruction)):
                 target = inst.target
                 if self._is_temporary(target) and target not in used_vars:
+                    # Do not remove division/modulo by zero (potentially unsafe operation)
+                    if isinstance(inst, BinaryOpInstruction) and inst.op in ("/", "%"):
+                        if isinstance(inst.right, Constant) and inst.right.value in (0, 0.0):
+                            new_instructions.append(inst)
+                            continue
                     self.transformations.append(
                         f"Removed unused temporary computation: {inst}"
                     )
