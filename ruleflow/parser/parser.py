@@ -184,6 +184,18 @@ class Parser:
         """
         target_tok = self.expect(TokenType.IDENTIFIER, "Expected identifier in assignment")
         self.expect(TokenType.ASSIGN, "Expected '=' in assignment")
+
+        # Explicit check for missing value after '='
+        if self.check(TokenType.EOF, TokenType.END, TokenType.ELSE, TokenType.RULE):
+            tok = self.current_token()
+            found_str = repr(tok.value) if tok.value else tok.type.value
+            raise ParserError(
+                f"Missing assignment value after '=' for variable '{target_tok.value}' (found: {found_str})",
+                tok.line,
+                tok.column,
+                found_token=tok,
+            )
+
         value_expr = self.parse_expression()
 
         return AssignmentNode(

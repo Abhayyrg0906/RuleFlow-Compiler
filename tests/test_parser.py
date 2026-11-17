@@ -366,6 +366,48 @@ def test_unexpected_token_in_expression():
     assert "Unexpected token in expression" in err.message
 
 
+def test_nested_logical_and_arithmetic_expressions():
+    """Verify complex nested logical and arithmetic expressions with parentheses."""
+    code = """
+    RULE ComplexRule:
+        IF (score + bonus >= 100) AND NOT (is_penalized == 1) THEN
+            tier = "Gold"
+        END
+    """
+    ast = parse_code(code)
+    if_stmt = ast.statements[0].body[0]
+    cond = if_stmt.condition
+
+    assert isinstance(cond, BinaryOpNode)
+    assert cond.op == "AND"
+
+    # Left: (score + bonus >= 100)
+    left_rel = cond.left
+    assert isinstance(left_rel, BinaryOpNode)
+    assert left_rel.op == ">="
+    assert left_rel.left.op == "+"
+    assert left_rel.right.value == 100
+
+    # Right: NOT (is_penalized == 1)
+    right_not = cond.right
+    assert isinstance(right_not, UnaryOpNode)
+    assert right_not.op == "NOT"
+    assert right_not.operand.op == "=="
+
+
+def test_missing_assignment_value():
+    """Verify error when an assignment statement is missing a value after '='."""
+    code = """
+    RULE BadAssign:
+        x =
+    """
+    with pytest.raises(ParserError) as exc_info:
+        parse_code(code)
+
+    err = exc_info.value
+    assert "Missing assignment value after '=' for variable 'x'" in err.message
+
+
 def test_invalid_statement_start():
     """Verify error when a statement begins with an invalid token."""
     code = """
