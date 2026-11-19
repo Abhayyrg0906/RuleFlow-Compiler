@@ -12,6 +12,8 @@ class TokenType(str, Enum):
     THEN = "THEN"
     ELSE = "ELSE"
     END = "END"
+    WHILE = "WHILE"
+    DO = "DO"
     AND = "AND"
     OR = "OR"
     NOT = "NOT"

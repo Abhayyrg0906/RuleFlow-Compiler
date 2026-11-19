@@ -64,7 +64,8 @@ RuleFlow-Compiler/
 │   ├── student_eligibility.rf
 │   ├── discount_calculation.rf
 │   ├── grade_evaluation.rf
-│   └── builtin_functions.rf
+│   ├── builtin_functions.rf
+│   └── while_loop.rf
 │
 └── tests/                     # Unit and integration tests
     ├── __init__.py
@@ -257,6 +258,7 @@ Verify all compiler modules using `pytest`:
 - [x] **Module 5: Code Generation & Direct Rule Execution Engine (TAC Interpreter, Runtime State, Test Suite)**
 - [x] **Phase 7.1: Multi-way Branching with ELSE IF**
 - [x] **Phase 7.2: Built-in Function Support (ABS, MIN, MAX, ROUND, LENGTH)**
+- [x] **Phase 7.3: Iterative Control Flow with WHILE Loops**
 
 ---
 
@@ -280,4 +282,43 @@ RULE Demo:
 END
 ```
 Compile-time constant folding and constant propagation optimize built-in calls when all arguments evaluate to constants.
+
+---
+
+## 🔁 WHILE Loop Support (Phase 7.3)
+
+RuleFlow supports structured iteration using the `WHILE ... DO ... END` construct.
+
+### Grammar
+```ebnf
+while_statement ::= WHILE expression DO statement* END
+```
+
+### Example
+```ruleflow
+RULE Countdown:
+    count = 5
+    total = 0
+
+    WHILE count > 0 DO
+        total = total + count
+        count = count - 1
+    END
+
+    result = total
+END
+```
+
+### Semantics & Safety
+1. **Condition Type**: The loop condition must evaluate to a `BOOLEAN`. Non-boolean conditions are statically rejected with a `SemanticError`.
+2. **Definite Assignment**: Because a `WHILE` loop may execute zero times, variables assigned *solely* inside the loop body are not considered definitely assigned after the loop. Variables defined before the loop remain visible and safely modified.
+3. **Control-Flow TAC**:
+   - Emits a loop start label (`LABEL L_while_start_N`).
+   - Evaluates the loop condition and jumps to the loop end label on false (`IF_FALSE cond GOTO L_while_end_N`).
+   - Executes loop body statements.
+   - Emits a backward unconditional jump (`GOTO L_while_start_N`).
+   - Closes with the loop exit label (`LABEL L_while_end_N`).
+4. **Loop Safety & Step Limit**: The runtime interpreter enforces a configurable step threshold (`max_steps`, defaulting to 10,000 steps). Infinite loops are safely terminated with an `ExecutionError`, preventing process freezes.
+5. **Optimizer Safety**: Conservative control-flow boundaries ensure that loop headers clear transient constants, preventing unsafe propagation across loop iterations.
+
 

@@ -19,7 +19,7 @@ from ruleflow.ir.instructions import (
 )
 
 
-def run_pipeline(code: str, inputs=None, input_types=None, optimize=True):
+def run_pipeline(code: str, inputs=None, input_types=None, optimize=True, max_steps=10000):
     """Compile and execute a RuleFlow code string through the full compiler pipeline."""
     tokens = Lexer(code).tokenize()
     ast = Parser(tokens).parse()
@@ -30,7 +30,11 @@ def run_pipeline(code: str, inputs=None, input_types=None, optimize=True):
     ir_to_run = Optimizer(raw_ir).optimize() if optimize else raw_ir
     target_code = CodeGenerator(ir_to_run).generate()
 
-    executor = Executor(target_code=target_code, symbol_table=analyzer.symbol_table)
+    executor = Executor(
+        target_code=target_code,
+        symbol_table=analyzer.symbol_table,
+        max_steps=max_steps,
+    )
     result = executor.execute(inputs=inputs)
     return result
 
@@ -823,4 +827,160 @@ def test_execution_builtin_function_runtime_errors():
     res = interp.execute()
     assert res.status == "failed"
     assert "Function ABS requires exactly 1 numeric argument" in res.error
+
+
+# -------------------------------------------------------------
+# 7. WHILE Loop Execution Tests (Phase 7.3)
+# -------------------------------------------------------------
+
+def test_execution_while_countdown_and_sum():
+    """Test 40: Execute countdown and summation loop, validating final outputs."""
+    code = """
+    RULE Countdown:
+        count = 5
+        total = 0
+
+        WHILE count > 0 DO
+            total = total + count
+            count = count - 1
+        END
+
+        result = total
+    END
+    """
+    for opt in [False, True]:
+        res = run_pipeline(code, optimize=opt)
+        assert res.status == "success"
+        assert res.outputs["count"] == 0
+        assert res.outputs["total"] == 15
+        assert res.outputs["result"] == 15
+
+
+def test_execution_while_loop_with_if_else():
+    """Test 41: Execute WHILE loop containing conditional branching."""
+    code = """
+    RULE WhileIfBranch:
+        i = 1
+        evens = 0
+        odds = 0
+
+        WHILE i <= 6 DO
+            IF i % 2 == 0 THEN
+                evens = evens + 1
+            ELSE
+                odds = odds + 1
+            END
+            i = i + 1
+        END
+    END
+    """
+    for opt in [False, True]:
+        res = run_pipeline(code, optimize=opt)
+        assert res.status == "success"
+        assert res.outputs["i"] == 7
+        assert res.outputs["evens"] == 3
+        assert res.outputs["odds"] == 3
+
+
+def test_execution_nested_while_loops():
+    """Test 42: Execute nested WHILE loops (multiplication accumulator)."""
+    code = """
+    RULE NestedWhile:
+        i = 1
+        product = 1
+
+        WHILE i <= 3 DO
+            j = 1
+            WHILE j <= 2 DO
+                product = product * 2
+                j = j + 1
+            END
+            i = i + 1
+        END
+    END
+    """
+    for opt in [False, True]:
+        res = run_pipeline(code, optimize=opt)
+        assert res.status == "success"
+        # Total inner iterations: 3 * 2 = 6, 2^6 = 64
+        assert res.outputs["product"] == 64
+        assert res.outputs["i"] == 4
+
+
+def test_execution_multiple_sequential_while_loops():
+    """Test 43: Execute multiple sequential WHILE loops."""
+    code = """
+    RULE SequentialWhile:
+        a = 3
+        sum_a = 0
+        WHILE a > 0 DO
+            sum_a = sum_a + a
+            a = a - 1
+        END
+
+        b = 4
+        sum_b = 0
+        WHILE b > 0 DO
+            sum_b = sum_b + b
+            b = b - 1
+        END
+
+        combined = sum_a + sum_b
+    END
+    """
+    for opt in [False, True]:
+        res = run_pipeline(code, optimize=opt)
+        assert res.status == "success"
+        assert res.outputs["sum_a"] == 6
+        assert res.outputs["sum_b"] == 10
+        assert res.outputs["combined"] == 16
+
+
+def test_execution_while_with_builtins():
+    """Test 44: Execute WHILE loop using built-in functions in condition and body."""
+    code = """
+    RULE WhileBuiltins:
+        val = -5
+        steps = 0
+
+        WHILE ABS(val) > 0 DO
+            val = val + 1
+            steps = steps + 1
+        END
+    END
+    """
+    for opt in [False, True]:
+        res = run_pipeline(code, optimize=opt)
+        assert res.status == "success"
+        assert res.outputs["val"] == 0
+        assert res.outputs["steps"] == 5
+
+
+def test_execution_infinite_while_loop_step_limit():
+    """Test 45: Infinite WHILE loop safely aborts via maximum step limit protection."""
+    code = """
+    RULE InfiniteLoop:
+        x = 1
+        WHILE x > 0 DO
+            x = x + 1
+        END
+    END
+    """
+    res = run_pipeline(code, max_steps=100)
+    assert res.status == "failed"
+    assert "Execution step limit exceeded" in res.error
+
+
+def test_execution_while_loop_example_file():
+    """Test 46: Execute examples/while_loop.rf end-to-end."""
+    path = Path(__file__).parent.parent / "examples" / "while_loop.rf"
+    code = path.read_text(encoding="utf-8")
+
+    for opt in [False, True]:
+        res = run_pipeline(code, optimize=opt)
+        assert res.status == "success"
+        assert res.outputs["count"] == 0
+        assert res.outputs["total"] == 15
+        assert res.outputs["result"] == 15
+
 

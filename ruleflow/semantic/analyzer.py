@@ -13,6 +13,7 @@ from ruleflow.ast.nodes import (
     ProgramNode,
     RuleDeclarationNode,
     IfStatementNode,
+    WhileStatementNode,
     AssignmentNode,
     BinaryOpNode,
     UnaryOpNode,
@@ -107,6 +108,8 @@ class SemanticAnalyzer:
             self.analyze_assignment(stmt)
         elif isinstance(stmt, IfStatementNode):
             self.analyze_if(stmt)
+        elif isinstance(stmt, WhileStatementNode):
+            self.analyze_while(stmt)
         elif isinstance(stmt, RuleDeclarationNode):
             self.analyze_rule(stmt)
         else:
@@ -237,6 +240,33 @@ class SemanticAnalyzer:
                         line=first_sym.line,
                         column=first_sym.column,
                     )
+
+    def analyze_while(self, node: WhileStatementNode) -> None:
+        """Analyze a WHILE loop statement and enforce definite assignment rules."""
+        if self.current_symbol_table is None:
+            self.current_symbol_table = self.create_initial_symbol_table()
+
+        # 1. Condition must evaluate to BOOLEAN
+        condition_type = self.analyze_expression(node.condition)
+        if condition_type != DataType.BOOLEAN:
+            raise SemanticError(
+                f"WHILE condition must evaluate to BOOLEAN, got {condition_type.value}",
+                line=node.condition.line,
+                column=node.condition.column,
+            )
+
+        base_table = self.current_symbol_table
+
+        # 2. Analyze loop body in an isolated branched scope
+        loop_table = base_table.copy()
+        self.current_symbol_table = loop_table
+        for stmt in node.body:
+            self.analyze_statement(stmt)
+
+        # 3. Definite assignment:
+        # A WHILE loop may execute zero times, so variables assigned only inside
+        # the loop are NOT definitely assigned afterward. Restore base table.
+        self.current_symbol_table = base_table
 
     def analyze_expression(self, node: ASTNode) -> DataType:
         """Infer and validate the data type of an expression node."""

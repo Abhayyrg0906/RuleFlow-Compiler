@@ -246,3 +246,32 @@ def test_unterminated_string_error():
 
     error = exc_info.value
     assert "Unterminated string literal" in error.message
+
+
+def test_while_and_do_keywords():
+    """Verify recognition of WHILE and DO keywords and compatibility with similar identifiers."""
+    code = "WHILE count > 0 DO while do while_count domain my_while dowhile"
+    tokens = Lexer(code).tokenize()
+
+    assert tokens[0].type == TokenType.WHILE
+    assert tokens[0].value == "WHILE"
+    assert tokens[1].type == TokenType.IDENTIFIER
+    assert tokens[2].type == TokenType.GREATER_THAN
+    assert tokens[3].type == TokenType.INTEGER
+    assert tokens[4].type == TokenType.DO
+    assert tokens[4].value == "DO"
+
+    # Lowercase aliases
+    assert tokens[5].type == TokenType.WHILE
+    assert tokens[6].type == TokenType.DO
+
+    # Identifiers containing while or do
+    assert tokens[7].type == TokenType.IDENTIFIER
+    assert tokens[7].value == "while_count"
+    assert tokens[8].type == TokenType.IDENTIFIER
+    assert tokens[8].value == "domain"
+    assert tokens[9].type == TokenType.IDENTIFIER
+    assert tokens[9].value == "my_while"
+    assert tokens[10].type == TokenType.IDENTIFIER
+    assert tokens[10].value == "dowhile"
+

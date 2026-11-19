@@ -268,3 +268,54 @@ def test_builtin_function_propagation_and_nested_folding():
     assert assigns["y"] == 25
     assert assigns["nested"] == 15
 
+
+# -------------------------------------------------------------
+# 6. WHILE Loop Optimizer Tests (Phase 7.3)
+# -------------------------------------------------------------
+
+def test_while_loop_no_constant_leak_into_loop():
+    """Verify that variables modified in a loop are not statically folded as initial constants."""
+    code = """
+    RULE LoopSafety:
+        count = 5
+        WHILE count > 0 DO
+            count = count - 1
+        END
+        result = count
+    END
+    """
+    _, opt_ir, opt = get_optimized_ir(code)
+
+    # Verify loop condition still tests dynamic 'count', not folded constant
+    binops = [inst for inst in opt_ir if isinstance(inst, BinaryOpInstruction)]
+    cond_binop = [b for b in binops if b.op == ">"][0]
+    assert cond_binop.left == "count"  # Not folded into Constant(5) > Constant(0)
+
+    # Verify loop labels and jumps remain intact
+    labels = [inst.label for inst in opt_ir if isinstance(inst, LabelInstruction)]
+    gotos = [inst for inst in opt_ir if isinstance(inst, JumpInstruction)]
+    jumps_if_false = [inst for inst in opt_ir if isinstance(inst, JumpIfFalseInstruction)]
+
+    assert len(labels) == 2
+    assert len(gotos) == 1
+    assert len(jumps_if_false) == 1
+
+
+def test_while_loop_labels_and_jumps_preserved():
+    """Verify that loop labels, backward jumps, and exit jumps are fully preserved."""
+    code = """
+    RULE PreserveLoops:
+        x = 0
+        WHILE x < 10 DO
+            x = x + 1
+        END
+    END
+    """
+    raw_ir, opt_ir, _ = get_optimized_ir(code)
+
+    raw_labels = [inst.label for inst in raw_ir if isinstance(inst, LabelInstruction)]
+    opt_labels = [inst.label for inst in opt_ir if isinstance(inst, LabelInstruction)]
+
+    assert raw_labels == opt_labels
+
+

@@ -625,3 +625,180 @@ def test_function_call_node_methods():
     assert "FunctionCallNode: 'ABS'" in fn_node.pretty()
     assert repr(fn_node).startswith("FunctionCallNode(name='ABS'")
 
+
+# -------------------------------------------------------------
+# 6. WHILE Loop Parser Tests (Phase 7.3)
+# -------------------------------------------------------------
+
+def test_parse_basic_while_loop():
+    """Verify parsing a basic WHILE loop."""
+    from ruleflow.ast.nodes import WhileStatementNode, BinaryOpNode, AssignmentNode
+
+    code = """
+    RULE WhileDemo:
+        WHILE count > 0 DO
+            count = count - 1
+        END
+    END
+    """
+    ast = parse_code(code)
+    rule = ast.statements[0]
+    assert len(rule.body) == 1
+    while_node = rule.body[0]
+    assert isinstance(while_node, WhileStatementNode)
+    assert isinstance(while_node.condition, BinaryOpNode)
+    assert while_node.condition.op == ">"
+    assert len(while_node.body) == 1
+    assert isinstance(while_node.body[0], AssignmentNode)
+
+
+def test_parse_empty_while_loop_body():
+    """Verify parsing a WHILE loop with an empty body."""
+    from ruleflow.ast.nodes import WhileStatementNode
+
+    code = """
+    RULE EmptyWhile:
+        WHILE active DO
+        END
+    END
+    """
+    ast = parse_code(code)
+    while_node = ast.statements[0].body[0]
+    assert isinstance(while_node, WhileStatementNode)
+    assert len(while_node.body) == 0
+
+
+def test_parse_while_missing_do_error():
+    """Verify syntax error when DO keyword is missing."""
+    code = """
+    RULE MissingDo:
+        WHILE count > 0
+            count = count - 1
+        END
+    END
+    """
+    with pytest.raises(ParserError) as exc_info:
+        parse_code(code)
+    assert "Expected 'DO' after WHILE condition" in exc_info.value.message
+
+
+def test_parse_while_missing_end_error():
+    """Verify syntax error when END keyword is missing."""
+    code = """
+    RULE MissingEnd:
+        WHILE count > 0 DO
+            count = count - 1
+    """
+    with pytest.raises(ParserError) as exc_info:
+        parse_code(code)
+    assert "Expected 'END' to close WHILE loop" in exc_info.value.message
+
+
+def test_parse_nested_while_loops():
+    """Verify parsing of nested WHILE loops."""
+    from ruleflow.ast.nodes import WhileStatementNode
+
+    code = """
+    RULE NestedLoops:
+        i = 0
+        WHILE i < 3 DO
+            j = 0
+            WHILE j < 3 DO
+                j = j + 1
+            END
+            i = i + 1
+        END
+    END
+    """
+    ast = parse_code(code)
+    body = ast.statements[0].body
+    outer_while = body[1]
+    assert isinstance(outer_while, WhileStatementNode)
+    assert len(outer_while.body) == 3
+    inner_while = outer_while.body[1]
+    assert isinstance(inner_while, WhileStatementNode)
+    assert len(inner_while.body) == 1
+
+
+def test_parse_if_inside_while():
+    """Verify parsing of IF/ELSE statements nested inside a WHILE loop."""
+    from ruleflow.ast.nodes import WhileStatementNode, IfStatementNode
+
+    code = """
+    RULE IfInWhile:
+        WHILE count > 0 DO
+            IF count % 2 == 0 THEN
+                evens = evens + 1
+            ELSE
+                odds = odds + 1
+            END
+            count = count - 1
+        END
+    END
+    """
+    ast = parse_code(code)
+    while_node = ast.statements[0].body[0]
+    assert isinstance(while_node, WhileStatementNode)
+    assert len(while_node.body) == 2
+    assert isinstance(while_node.body[0], IfStatementNode)
+
+
+def test_parse_while_inside_if():
+    """Verify parsing of a WHILE loop nested inside an IF statement."""
+    from ruleflow.ast.nodes import WhileStatementNode, IfStatementNode
+
+    code = """
+    RULE WhileInIf:
+        IF flag THEN
+            WHILE count > 0 DO
+                count = count - 1
+            END
+        END
+    END
+    """
+    ast = parse_code(code)
+    if_node = ast.statements[0].body[0]
+    assert isinstance(if_node, IfStatementNode)
+    assert len(if_node.then_branch) == 1
+    assert isinstance(if_node.then_branch[0], WhileStatementNode)
+
+
+def test_parse_multiple_sequential_while_loops():
+    """Verify parsing of sequential WHILE loops within the same rule."""
+    from ruleflow.ast.nodes import WhileStatementNode
+
+    code = """
+    RULE SequentialWhiles:
+        WHILE a > 0 DO
+            a = a - 1
+        END
+        WHILE b > 0 DO
+            b = b - 1
+        END
+    END
+    """
+    ast = parse_code(code)
+    body = ast.statements[0].body
+    assert len(body) == 2
+    assert isinstance(body[0], WhileStatementNode)
+    assert isinstance(body[1], WhileStatementNode)
+
+
+def test_while_statement_node_methods():
+    """Verify WhileStatementNode to_dict, pretty, and repr methods."""
+    from ruleflow.ast.nodes import WhileStatementNode, LiteralNode
+
+    while_node = WhileStatementNode(
+        condition=LiteralNode(value=True, literal_type="BOOLEAN", line=1, column=7),
+        body=[],
+        line=1,
+        column=1,
+    )
+    d = while_node.to_dict()
+    assert d["node_type"] == "WhileStatementNode"
+    assert d["condition"]["value"] is True
+    assert d["body"] == []
+    assert "WhileStatementNode" in while_node.pretty()
+    assert repr(while_node).startswith("WhileStatementNode")
+
+

@@ -324,3 +324,103 @@ def test_ir_nested_function_calls():
     assert fn_calls[1].func_name == "ROUND"
     assert fn_calls[1].args[0] == fn_calls[0].target
 
+
+# -------------------------------------------------------------
+# 5. WHILE Loop IR Generation Tests (Phase 7.3)
+# -------------------------------------------------------------
+
+def test_ir_basic_while_loop():
+    """Test 15: TAC generation for a basic WHILE loop."""
+    code = """
+    RULE WhileTAC:
+        count = 3
+        WHILE count > 0 DO
+            count = count - 1
+        END
+    END
+    """
+    ir = generate_ir(code)
+
+    labels = [inst.label for inst in ir if isinstance(inst, LabelInstruction)]
+    jumps_if_false = [inst for inst in ir if isinstance(inst, JumpIfFalseInstruction)]
+    gotos = [inst for inst in ir if isinstance(inst, JumpInstruction)]
+
+    # Two labels: L_while_start and L_while_end
+    assert len(labels) == 2
+    assert any("while_start" in lbl for lbl in labels)
+    assert any("while_end" in lbl for lbl in labels)
+
+    # One conditional jump out of loop, one backward unconditional jump
+    assert len(jumps_if_false) == 1
+    assert len(gotos) == 1
+
+    start_label = [lbl for lbl in labels if "while_start" in lbl][0]
+    end_label = [lbl for lbl in labels if "while_end" in lbl][0]
+
+    assert jumps_if_false[0].target_label == end_label
+    assert gotos[0].target_label == start_label
+
+
+def test_ir_nested_while_loops():
+    """Test 16: TAC generation for nested WHILE loops with unique labels."""
+    code = """
+    RULE NestedTAC:
+        i = 0
+        WHILE i < 2 DO
+            j = 0
+            WHILE j < 2 DO
+                j = j + 1
+            END
+            i = i + 1
+        END
+    END
+    """
+    ir = generate_ir(code)
+
+    labels = [inst.label for inst in ir if isinstance(inst, LabelInstruction)]
+    jumps_if_false = [inst for inst in ir if isinstance(inst, JumpIfFalseInstruction)]
+    gotos = [inst for inst in ir if isinstance(inst, JumpInstruction)]
+
+    # 2 loops -> 4 labels
+    assert len(labels) == 4
+    assert len(set(labels)) == 4  # All labels are unique
+    assert len(jumps_if_false) == 2
+    assert len(gotos) == 2
+
+    # Every jump targets an existing label
+    for j in jumps_if_false:
+        assert j.target_label in labels
+    for g in gotos:
+        assert g.target_label in labels
+
+
+def test_ir_while_with_if_statement():
+    """Test 17: TAC generation for WHILE loop combined with IF-ELSE statement."""
+    code = """
+    RULE WhileIfCombo:
+        count = 5
+        WHILE count > 0 DO
+            IF count % 2 == 0 THEN
+                even = 1
+            ELSE
+                even = 0
+            END
+            count = count - 1
+        END
+    END
+    """
+    ir = generate_ir(code)
+
+    labels = [inst.label for inst in ir if isinstance(inst, LabelInstruction)]
+    jumps_if_false = [inst for inst in ir if isinstance(inst, JumpIfFalseInstruction)]
+    gotos = [inst for inst in ir if isinstance(inst, JumpInstruction)]
+
+    # While loop: start + end (2). If-Else: else + end (2). Total = 4 labels.
+    assert len(labels) == 4
+    assert len(set(labels)) == 4
+    for j in jumps_if_false:
+        assert j.target_label in labels
+    for g in gotos:
+        assert g.target_label in labels
+
+

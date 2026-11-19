@@ -13,6 +13,7 @@ from ruleflow.ast.nodes import (
     RuleDeclarationNode,
     IfStatementNode,
     ElseIfNode,
+    WhileStatementNode,
     AssignmentNode,
     BinaryOpNode,
     UnaryOpNode,
@@ -106,6 +107,8 @@ class Parser:
             return self.parse_rule()
         if self.check(TokenType.IF):
             return self.parse_if()
+        if self.check(TokenType.WHILE):
+            return self.parse_while()
         if self.check(TokenType.IDENTIFIER) and self.peek().type == TokenType.ASSIGN:
             return self.parse_assignment()
 
@@ -200,6 +203,29 @@ class Parser:
             elif_branches=elif_branches,
             line=if_tok.line,
             column=if_tok.column,
+        )
+
+    def parse_while(self) -> WhileStatementNode:
+        """Parse a WHILE loop statement.
+
+        Grammar:
+            while_statement ::= WHILE expression DO statement* END
+        """
+        while_tok = self.expect(TokenType.WHILE, "Expected 'WHILE' keyword")
+        condition = self.parse_expression()
+        self.expect(TokenType.DO, "Expected 'DO' after WHILE condition")
+
+        body: List[ASTNode] = []
+        while not self.check(TokenType.END, TokenType.EOF, TokenType.RULE):
+            body.append(self.parse_statement())
+
+        self.expect(TokenType.END, "Expected 'END' to close WHILE loop")
+
+        return WhileStatementNode(
+            condition=condition,
+            body=body,
+            line=while_tok.line,
+            column=while_tok.column,
         )
 
     def parse_assignment(self) -> AssignmentNode:

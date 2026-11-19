@@ -1,0 +1,12 @@
+// Example: WHILE loop demonstrating countdown and summation in RuleFlow
+RULE Countdown:
+    count = 5
+    total = 0
+
+    WHILE count > 0 DO
+        total = total + count
+        count = count - 1
+    END
+
+    result = total
+END

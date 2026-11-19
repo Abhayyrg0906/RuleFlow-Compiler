@@ -494,3 +494,120 @@ def test_semantic_function_arg_type_errors():
         parse_and_analyze(code4)
     assert "requires numeric arguments" in exc_info.value.message
 
+
+# -------------------------------------------------------------
+# 6. WHILE Loop Semantic Analysis Tests (Phase 7.3)
+# -------------------------------------------------------------
+
+def test_semantic_while_boolean_condition_valid():
+    """Verify semantic validation of valid boolean conditions in WHILE loops."""
+    code = """
+    RULE WhileValid:
+        count = 5
+        WHILE count > 0 DO
+            count = count - 1
+        END
+        final_count = count
+    END
+    """
+    analyzer = parse_and_analyze(code)
+    table = analyzer.current_symbol_table
+    assert table.lookup("count").data_type == DataType.INTEGER
+    assert table.lookup("final_count").data_type == DataType.INTEGER
+
+
+def test_semantic_while_numeric_condition_rejected():
+    """Verify that a numeric condition in WHILE loop raises a SemanticError."""
+    code = """
+    RULE BadCondition:
+        WHILE 10 DO
+            x = 1
+        END
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "WHILE condition must evaluate to BOOLEAN, got INTEGER" in exc_info.value.message
+
+
+def test_semantic_while_undefined_variable_in_condition_rejected():
+    """Verify that an undefined variable in a WHILE condition raises a SemanticError."""
+    code = """
+    RULE UndefinedCond:
+        WHILE missing_counter > 0 DO
+            x = 1
+        END
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "Undefined variable 'missing_counter'" in exc_info.value.message
+
+
+def test_semantic_while_incompatible_assignment_rejected():
+    """Verify that assigning an incompatible type inside a WHILE loop raises a SemanticError."""
+    code = """
+    RULE BadAssignInWhile:
+        count = 10
+        WHILE count > 0 DO
+            count = "invalid string"
+        END
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "Cannot assign STRING to INTEGER variable 'count'" in exc_info.value.message
+
+
+def test_semantic_while_definite_assignment_not_guaranteed():
+    """Verify that variables assigned solely inside a WHILE loop are not definitely assigned afterward."""
+    code = """
+    RULE IndefiniteAssign:
+        count = 5
+        WHILE count > 0 DO
+            loop_var = 100
+            count = count - 1
+        END
+        out = loop_var
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "Undefined variable 'loop_var'" in exc_info.value.message
+
+
+def test_semantic_while_prior_variable_remains_available():
+    """Verify that variables assigned before a WHILE loop remain available and typed after the loop."""
+    code = """
+    RULE PriorVarValid:
+        total = 0
+        count = 5
+        WHILE count > 0 DO
+            total = total + count
+            count = count - 1
+        END
+        result = total + count
+    END
+    """
+    analyzer = parse_and_analyze(code)
+    table = analyzer.current_symbol_table
+    assert table.lookup("total").data_type == DataType.INTEGER
+    assert table.lookup("count").data_type == DataType.INTEGER
+    assert table.lookup("result").data_type == DataType.INTEGER
+
+
+def test_semantic_while_builtin_function_in_condition():
+    """Verify that built-in function calls work properly within WHILE conditions."""
+    code = """
+    RULE BuiltinInWhile:
+        diff = -10
+        WHILE ABS(diff) > 0 DO
+            diff = diff + 1
+        END
+    END
+    """
+    analyzer = parse_and_analyze(code)
+    table = analyzer.current_symbol_table
+    assert table.lookup("diff").data_type == DataType.INTEGER
+
+

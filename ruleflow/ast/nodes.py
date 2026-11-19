@@ -196,6 +196,43 @@ class IfStatementNode(ASTNode):
         return f"IfStatementNode(condition={self.condition}, then={len(self.then_branch)}, elifs={len(self.elif_branches)}, has_else={has_else})"
 
 
+class WhileStatementNode(ASTNode):
+    """Represents a WHILE condition DO statement* END loop."""
+
+    def __init__(
+        self,
+        condition: ASTNode,
+        body: Optional[List[ASTNode]] = None,
+        line: int = 1,
+        column: int = 1,
+    ):
+        super().__init__(line, column)
+        self.condition = condition
+        self.body: List[ASTNode] = body or []
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "node_type": "WhileStatementNode",
+            "condition": self.condition.to_dict(),
+            "body": [stmt.to_dict() for stmt in self.body],
+            "line": self.line,
+            "column": self.column,
+        }
+
+    def pretty(self, indent: int = 0) -> str:
+        space = "  " * indent
+        lines = [f"{space}WhileStatementNode (line {self.line}, col {self.column}):"]
+        lines.append(f"{space}  Condition:")
+        lines.append(self.condition.pretty(indent + 2))
+        lines.append(f"{space}  Body:")
+        for stmt in self.body:
+            lines.append(stmt.pretty(indent + 2))
+        return "\n".join(lines)
+
+    def __repr__(self) -> str:
+        return f"WhileStatementNode(condition={self.condition}, body={len(self.body)})"
+
+
 class AssignmentNode(ASTNode):
     """Represents a variable assignment statement (target = value)."""
 

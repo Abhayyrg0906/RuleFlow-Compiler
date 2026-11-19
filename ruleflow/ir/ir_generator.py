@@ -10,6 +10,7 @@ from ruleflow.ast.nodes import (
     ProgramNode,
     RuleDeclarationNode,
     IfStatementNode,
+    WhileStatementNode,
     AssignmentNode,
     BinaryOpNode,
     UnaryOpNode,
@@ -85,6 +86,8 @@ class IRGenerator:
             self.generate_assignment(stmt)
         elif isinstance(stmt, IfStatementNode):
             self.generate_if(stmt)
+        elif isinstance(stmt, WhileStatementNode):
+            self.generate_while(stmt)
         else:
             # Standalone expression
             self.generate_expression(stmt)
@@ -140,6 +143,21 @@ class IRGenerator:
                 self.generate_statement(stmt)
 
         # 4. End label converging all branches
+        self.emit(LabelInstruction(label=end_label))
+
+    def generate_while(self, node: WhileStatementNode) -> None:
+        """Generate control-flow IR for a WHILE loop statement."""
+        start_label = self.new_label("L_while_start")
+        end_label = self.new_label("L_while_end")
+
+        self.emit(LabelInstruction(label=start_label))
+        cond_val = self.generate_expression(node.condition)
+        self.emit(JumpIfFalseInstruction(condition=cond_val, target_label=end_label))
+
+        for stmt in node.body:
+            self.generate_statement(stmt)
+
+        self.emit(JumpInstruction(target_label=start_label))
         self.emit(LabelInstruction(label=end_label))
 
     def generate_expression(self, node: ASTNode) -> Any:
