@@ -4,3 +4,4 @@ RULE ApplyDiscount:
         discount = cart_total * 0.20
         final_total = cart_total - discount
     END
+END
