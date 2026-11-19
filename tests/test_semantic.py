@@ -298,3 +298,199 @@ def test_student_eligibility_semantic_analysis():
     assert status_sym is not None
     assert status_sym.data_type == DataType.STRING
     assert status_sym.is_input is False
+
+
+# -------------------------------------------------------------
+# 4. ELSE IF Semantic Tests
+# -------------------------------------------------------------
+
+def test_semantic_non_boolean_else_if_condition():
+    """Verify semantic error when an ELSE IF condition is not BOOLEAN."""
+    code = """
+    RULE BadElifCond:
+        IF x > 10 THEN
+            y = 1
+        ELSE IF 42 + 5 THEN
+            y = 2
+        ELSE
+            y = 3
+        END
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code, input_types={"x": "INTEGER"})
+    assert "ELSE IF condition must evaluate to BOOLEAN, got INTEGER" in exc_info.value.message
+
+
+def test_semantic_definite_assignment_across_all_else_if_branches():
+    """Verify variable assigned in IF, all ELSE IFs, and ELSE is definitely assigned afterward."""
+    code = """
+    RULE DefiniteAssignElif:
+        IF score >= 90 THEN
+            grade = "A"
+        ELSE IF score >= 75 THEN
+            grade = "B"
+        ELSE IF score >= 60 THEN
+            grade = "C"
+        ELSE
+            grade = "F"
+        END
+        final_grade = grade
+    END
+    """
+    analyzer = parse_and_analyze(code, input_types={"score": "INTEGER"})
+    table = analyzer.symbol_tables["DefiniteAssignElif"]
+    assert table.is_defined("grade")
+    assert table.is_defined("final_grade")
+    assert table.lookup("grade").data_type == DataType.STRING
+
+
+def test_semantic_variable_assigned_in_only_some_else_if_branches_error():
+    """Verify error when a variable assigned in only some ELSE IF branches is used afterward."""
+    code = """
+    RULE PartialAssignElif:
+        IF score >= 90 THEN
+            grade = "A"
+            bonus = 10
+        ELSE IF score >= 75 THEN
+            grade = "B"
+        ELSE
+            grade = "F"
+            bonus = 0
+        END
+        result = bonus + 1
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code, input_types={"score": "INTEGER"})
+    assert "Undefined variable 'bonus'" in exc_info.value.message
+
+
+def test_semantic_incompatible_types_across_else_if_branches_error():
+    """Verify error when variable is assigned incompatible types across ELSE IF branches."""
+    code = """
+    RULE IncompatibleElif:
+        IF score >= 90 THEN
+            res = "Excellent"
+        ELSE IF score >= 75 THEN
+            res = 100
+        ELSE
+            res = "Try Again"
+        END
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code, input_types={"score": "INTEGER"})
+    assert "assigned with incompatible types across branches" in exc_info.value.message
+
+
+# -------------------------------------------------------------
+# 5. Built-in Function Semantic Analysis Tests (Phase 7.2)
+# -------------------------------------------------------------
+
+def test_semantic_builtin_functions_valid():
+    """Verify semantic validation and type inference for valid built-in function calls."""
+    code = """
+    RULE BuiltinsValid:
+        a = ABS(-10)
+        b = ABS(-3.14)
+        c = MIN(10, 20)
+        d = MIN(10, 20.5)
+        e = MAX(10, 20)
+        f = MAX(10.5, 20)
+        g = ROUND(12.6)
+        h = ROUND(10)
+        i = LENGTH("RuleFlow")
+        j = LENGTH(user_name)
+    END
+    """
+    analyzer = parse_and_analyze(code, input_types={"user_name": "STRING"})
+    symtab = analyzer.current_symbol_table
+    assert symtab is not None
+    assert symtab.lookup("a").data_type == DataType.INTEGER
+    assert symtab.lookup("b").data_type == DataType.DECIMAL
+    assert symtab.lookup("c").data_type == DataType.INTEGER
+    assert symtab.lookup("d").data_type == DataType.DECIMAL
+    assert symtab.lookup("e").data_type == DataType.INTEGER
+    assert symtab.lookup("f").data_type == DataType.DECIMAL
+    assert symtab.lookup("g").data_type == DataType.INTEGER
+    assert symtab.lookup("h").data_type == DataType.INTEGER
+    assert symtab.lookup("i").data_type == DataType.INTEGER
+    assert symtab.lookup("j").data_type == DataType.INTEGER
+
+
+def test_semantic_unknown_function_error():
+    """Verify error on unknown function call."""
+    code = """
+    RULE BadFunction:
+        x = SQRT(16)
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "Unknown function 'SQRT'" in exc_info.value.message
+
+
+def test_semantic_function_arg_count_error():
+    """Verify error when function is called with incorrect argument count."""
+    code1 = """
+    RULE BadArgCount1:
+        x = ABS(1, 2)
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code1)
+    assert "Function 'ABS' requires exactly 1 argument" in exc_info.value.message
+
+    code2 = """
+    RULE BadArgCount2:
+        x = MIN(10)
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code2)
+    assert "Function 'MIN' requires exactly 2 argument" in exc_info.value.message
+
+
+def test_semantic_function_arg_type_errors():
+    """Verify error when function is called with incompatible argument types."""
+    # ABS with STRING
+    code1 = """
+    RULE BadAbs:
+        x = ABS("test")
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code1)
+    assert "requires a numeric argument" in exc_info.value.message
+
+    # LENGTH with INTEGER
+    code2 = """
+    RULE BadLen:
+        x = LENGTH(42)
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code2)
+    assert "requires a STRING argument" in exc_info.value.message
+
+    # ROUND with STRING
+    code3 = """
+    RULE BadRound:
+        x = ROUND("3.14")
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code3)
+    assert "requires a numeric argument" in exc_info.value.message
+
+    # MIN with non-numeric
+    code4 = """
+    RULE BadMin:
+        x = MIN("a", 10)
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code4)
+    assert "requires numeric arguments" in exc_info.value.message
+

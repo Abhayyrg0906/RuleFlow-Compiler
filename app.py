@@ -49,9 +49,21 @@ if selected_example_name != "Custom Input" and selected_example_name in example_
 st.sidebar.markdown("---")
 st.sidebar.header("🏷️ External Input Variables")
 default_inputs = (
-    "gpa: DECIMAL\nattendance: INTEGER"
-    if "student_eligibility" in selected_example_name
-    else ("cart_total: DECIMAL\ncustomer_tier: STRING" if "discount_calculation" in selected_example_name else "score: INTEGER")
+    "score: INTEGER\ntax_rate: DECIMAL\nstudent_name: STRING"
+    if "builtin_functions" in selected_example_name
+    else (
+        "marks: INTEGER"
+        if "grade_evaluation" in selected_example_name
+        else (
+            "gpa: DECIMAL\nattendance: INTEGER"
+            if "student_eligibility" in selected_example_name
+            else (
+                "cart_total: DECIMAL\ncustomer_tier: STRING"
+                if "discount_calculation" in selected_example_name
+                else "score: INTEGER"
+            )
+        )
+    )
 )
 inputs_text = st.sidebar.text_area(
     "Define Inputs (name: TYPE)",
@@ -71,9 +83,17 @@ for line in inputs_text.strip().splitlines():
 st.sidebar.markdown("---")
 st.sidebar.header("🎮 Runtime Input Values")
 default_values_text = (
-    "gpa = 3.8\nattendance = 85"
-    if "student_eligibility" in selected_example_name
-    else ("cart_total = 150.0\ncustomer_tier = \"GOLD\"" if "discount_calculation" in selected_example_name else "score = 90")
+    'score = 85\ntax_rate = 18.75\nstudent_name = "RuleFlow"'
+    if "builtin_functions" in selected_example_name
+    else (
+        "marks = 82"
+        if "grade_evaluation" in selected_example_name
+        else (
+            "gpa = 3.8\nattendance = 85"
+            if "student_eligibility" in selected_example_name
+            else ('cart_total = 150.0\ncustomer_tier = "GOLD"' if "discount_calculation" in selected_example_name else "score = 90")
+        )
+    )
 )
 runtime_values_input = st.sidebar.text_area(
     "Provide Values (name = value)",

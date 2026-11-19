@@ -215,3 +215,56 @@ def test_control_flow_labels_and_jumps_preserved():
     assert len(labels) == 2
     assert len(jumps_if_false) == 1
     assert len(gotos) == 1
+
+
+# -------------------------------------------------------------
+# 5. Built-in Function Optimization Tests (Phase 7.2)
+# -------------------------------------------------------------
+
+def test_builtin_function_constant_folding():
+    """Verify compile-time constant folding for all five built-in functions."""
+    code = """
+    RULE FoldBuiltins:
+        a = ABS(-42)
+        b = MIN(15, 30)
+        c = MAX(15, 30)
+        d = ROUND(12.6)
+        e = LENGTH("RuleFlow")
+    END
+    """
+    _, opt_ir, opt = get_optimized_ir(code)
+
+    assigns = {
+        inst.target: inst.source.value
+        for inst in opt_ir
+        if isinstance(inst, AssignInstruction) and isinstance(inst.source, Constant)
+    }
+
+    assert assigns["a"] == 42
+    assert assigns["b"] == 15
+    assert assigns["c"] == 30
+    assert assigns["d"] == 13
+    assert assigns["e"] == 8
+
+
+def test_builtin_function_propagation_and_nested_folding():
+    """Verify constant propagation into function arguments and nested folding."""
+    code = """
+    RULE NestedFolding:
+        x = -25
+        y = ABS(x)
+        nested = ROUND(MIN(14.8, 20.2))
+    END
+    """
+    _, opt_ir, opt = get_optimized_ir(code)
+
+    assigns = {
+        inst.target: inst.source.value
+        for inst in opt_ir
+        if isinstance(inst, AssignInstruction) and isinstance(inst.source, Constant)
+    }
+
+    assert assigns["x"] == -25
+    assert assigns["y"] == 25
+    assert assigns["nested"] == 15
+

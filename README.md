@@ -54,15 +54,28 @@ RuleFlow-Compiler/
 │   │   └── codegen.py
 │   └── execution/             # Execution engine / runtime
 │       ├── __init__.py
-│       └── executor.py
+│       ├── errors.py          # Runtime execution exceptions
+│       ├── executor.py        # High-level executor and input validator
+│       ├── interpreter.py     # Direct Three-Address Code interpreter
+│       └── runtime.py         # Runtime environment and variable state
 │
 ├── examples/                  # Sample RuleFlow source files
 │   ├── hello_rule.rf
-│   └── discount_calculation.rf
+│   ├── student_eligibility.rf
+│   ├── discount_calculation.rf
+│   ├── grade_evaluation.rf
+│   └── builtin_functions.rf
 │
 └── tests/                     # Unit and integration tests
     ├── __init__.py
-    └── test_structure.py
+    ├── test_structure.py
+    ├── test_lexer.py
+    ├── test_parser.py
+    ├── test_semantic.py
+    ├── test_ir.py
+    ├── test_optimizer.py
+    ├── test_audit_module4.py
+    └── test_execution.py
 ```
 
 ---
@@ -181,15 +194,53 @@ RuleFlow uses **Three-Address Code**, where each instruction has at most one ope
 
 ---
 
+## ⚡ Module 5: Code Generation and Rule Execution
+
+### Direct TAC Execution (Virtual Machine)
+The execution engine runs the generated Three-Address Code instructions directly inside a virtual runtime environment without translating them into Python source code and without invoking `eval()` or `exec()`.
+
+1. **Instruction Stream Interpretation**:
+   - `TACInterpreter` maintains a Program Counter (PC) traversing the instruction array sequentially.
+   - Jump instructions (`GOTO`, `IF_FALSE`, `IF_TRUE`) redirect the PC to pre-indexed label target indices in O(1) time.
+   - Infinite loop protection is enforced via a configurable step budget (`max_steps`, defaulting to 10,000 steps).
+
+2. **Runtime Environment & State Management**:
+   - `RuntimeEnvironment` stores variable bindings across execution.
+   - Variables are categorized into `external_inputs` (injected beforehand), `variables` (user-defined RuleFlow variables), and `temporaries` (`t1`, `t2`, ... created during IR generation).
+   - Compiler temporaries are hidden from the final user-facing output results (`get_outputs()`).
+
+3. **Operator Semantics & Strict Type Safety**:
+   - Arithmetic (`+`, `-`, `*`, `/`, `%`) enforces numeric arguments (`int` / `float`) and guards against boolean-to-integer coercion (Python's `bool` subclassing `int`).
+   - Relational (`<`, `<=`, `>`, `>=`) ensures numeric operands and returns Python booleans.
+   - Equality (`==`, `!=`) allows value comparisons between compatible types.
+   - Logical (`AND`, `OR`, `NOT`) strictly enforces boolean operands.
+   - Unary operators (`+`, `-`) require numeric values; unary `NOT` requires boolean values.
+
+4. **Runtime Error Handling**:
+   - Division / Modulo by Zero raises `ExecutionError` with exact instruction and step details.
+   - Accessing undefined variables at runtime raises `ExecutionError`.
+   - Missing required external inputs or type mismatches are caught during pre-execution verification.
+
+5. **Structured Execution Result**:
+   - Returns an `ExecutionResult` containing:
+     - `status`: `"success"` or `"error"`.
+     - `outputs`: Dictionary of user-visible RuleFlow variables (excluding compiler temporaries).
+     - `environment`: Complete runtime memory snapshot.
+     - `steps`: Total instruction count executed.
+     - `trace`: Step-by-step diagnostic execution log.
+     - `error`: Error message if execution terminated unexpectedly.
+
+---
+
 ## 🧪 Running Tests
 
-Verify the compiler modules using `pytest`:
+Verify all compiler modules using `pytest`:
 
 ```bash
-# Run Module 4 IR and Optimizer tests only
-.\venv\Scripts\pytest.exe tests/test_ir.py tests/test_optimizer.py -v
+# Run Module 5 Execution tests only
+.\venv\Scripts\pytest.exe tests/test_execution.py -v
 
-# Run entire test suite (Lexer + Parser + Semantic + IR + Optimizer + Structure)
+# Run entire test suite (Lexer + Parser + Semantic + IR + Optimizer + Execution + Structure)
 .\venv\Scripts\pytest.exe -v
 ```
 
@@ -203,5 +254,30 @@ Verify the compiler modules using `pytest`:
 - [x] **Module 2: Syntax Analysis & Abstract Syntax Tree (Parser & AST, Grammar, Error handling)**
 - [x] **Module 3: Semantic Analysis & Symbol Table Management (Types, Scopes, Definite Assignment)**
 - [x] **Module 4: Intermediate Code Generation (TAC) & Optimization (Folding, Propagation, DCE)**
-- [ ] Module 5: Target Code Generation
-- [ ] Module 6: Execution Engine / Runtime VM
+- [x] **Module 5: Code Generation & Direct Rule Execution Engine (TAC Interpreter, Runtime State, Test Suite)**
+- [x] **Phase 7.1: Multi-way Branching with ELSE IF**
+- [x] **Phase 7.2: Built-in Function Support (ABS, MIN, MAX, ROUND, LENGTH)**
+
+---
+
+## 🧩 Built-in Functions (Phase 7.2)
+
+RuleFlow includes five standard built-in functions:
+
+| Function | Signature | Description | Return Type |
+|---|---|---|---|
+| `ABS(value)` | `(INTEGER \| DECIMAL)` | Absolute value | Matches argument type |
+| `MIN(a, b)` | `(num, num)` | Minimum of two numbers | `DECIMAL` if either is `DECIMAL`, else `INTEGER` |
+| `MAX(a, b)` | `(num, num)` | Maximum of two numbers | `DECIMAL` if either is `DECIMAL`, else `INTEGER` |
+| `ROUND(value)` | `(INTEGER \| DECIMAL)` | Round to nearest integer | `INTEGER` |
+| `LENGTH(text)` | `(STRING)` | Length of string | `INTEGER` |
+
+Built-in functions can be nested and used inside complex arithmetic, relational, or logical expressions:
+```ruleflow
+RULE Demo:
+    val = ABS(MIN(score, 100) - MAX(score, 0)) + ROUND(12.7)
+    len = LENGTH("RuleFlow")
+END
+```
+Compile-time constant folding and constant propagation optimize built-in calls when all arguments evaluate to constants.
+

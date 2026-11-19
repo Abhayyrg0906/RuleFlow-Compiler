@@ -11,6 +11,7 @@ from .instructions import (
     JumpIfFalseInstruction,
     JumpIfTrueInstruction,
     RuleBoundaryInstruction,
+    FunctionCallInstruction,
     format_operand,
 )
 from .ir_generator import IRGenerator
@@ -26,6 +27,7 @@ __all__ = [
     "JumpIfFalseInstruction",
     "JumpIfTrueInstruction",
     "RuleBoundaryInstruction",
+    "FunctionCallInstruction",
     "format_operand",
     "IRGenerator",
 ]

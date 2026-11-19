@@ -419,3 +419,209 @@ def test_invalid_statement_start():
 
     err = exc_info.value
     assert "Unexpected token '==' at start of statement" in err.message
+
+
+# -------------------------------------------------------------
+# 4. ELSE IF Branch Tests
+# -------------------------------------------------------------
+
+def test_single_else_if_branch():
+    """Verify parsing a single ELSE IF branch."""
+    code = """
+    RULE SingleElseIf:
+        IF x > 10 THEN
+            y = 1
+        ELSE IF x > 5 THEN
+            y = 2
+        ELSE
+            y = 3
+        END
+    END
+    """
+    ast = parse_code(code)
+    rule = ast.statements[0]
+    if_stmt = rule.body[0]
+    assert isinstance(if_stmt, IfStatementNode)
+    assert len(if_stmt.then_branch) == 1
+    assert len(if_stmt.elif_branches) == 1
+    assert if_stmt.elif_branches[0].condition.op == ">"
+    assert if_stmt.elif_branches[0].body[0].target == "y"
+    assert len(if_stmt.else_branch) == 1
+
+
+def test_multiple_else_if_branches_with_else():
+    """Verify parsing multiple ELSE IF branches with final ELSE."""
+    code = """
+    RULE MultiElseIf:
+        IF marks >= 90 THEN
+            grade = "A"
+        ELSE IF marks >= 75 THEN
+            grade = "B"
+        ELSE IF marks >= 60 THEN
+            grade = "C"
+        ELSE
+            grade = "F"
+        END
+    END
+    """
+    ast = parse_code(code)
+    rule = ast.statements[0]
+    if_stmt = rule.body[0]
+    assert isinstance(if_stmt, IfStatementNode)
+    assert len(if_stmt.elif_branches) == 2
+    assert if_stmt.elif_branches[0].condition.right.value == 75
+    assert if_stmt.elif_branches[1].condition.right.value == 60
+    assert len(if_stmt.else_branch) == 1
+    assert if_stmt.else_branch[0].value.value == "F"
+
+
+def test_else_if_without_else():
+    """Verify parsing ELSE IF branches without a final ELSE."""
+    code = """
+    RULE ElseIfNoElse:
+        IF score >= 90 THEN
+            status = "Honors"
+        ELSE IF score >= 70 THEN
+            status = "Pass"
+        END
+    END
+    """
+    ast = parse_code(code)
+    rule = ast.statements[0]
+    if_stmt = rule.body[0]
+    assert isinstance(if_stmt, IfStatementNode)
+    assert len(if_stmt.elif_branches) == 1
+    assert len(if_stmt.else_branch) == 0
+
+
+def test_else_if_missing_condition_error():
+    """Verify syntax error when ELSE IF is missing condition."""
+    code = """
+    RULE BadElseIf:
+        IF x > 10 THEN
+            y = 1
+        ELSE IF THEN
+            y = 2
+        END
+    END
+    """
+    with pytest.raises(ParserError):
+        parse_code(code)
+
+
+def test_else_if_missing_then_error():
+    """Verify syntax error when ELSE IF is missing THEN keyword."""
+    code = """
+    RULE BadElseIfThen:
+        IF x > 10 THEN
+            y = 1
+        ELSE IF x > 5
+            y = 2
+        END
+    END
+    """
+    with pytest.raises(ParserError) as exc_info:
+        parse_code(code)
+    assert "Expected 'THEN' after ELSE IF condition" in exc_info.value.message
+
+
+def test_else_if_after_else_error():
+    """Verify syntax error when ELSE IF appears after an ELSE block."""
+    code = """
+    RULE InvalidOrder:
+        IF x > 10 THEN
+            y = 1
+        ELSE
+            y = 3
+        ELSE IF x > 5 THEN
+            y = 2
+        END
+    END
+    """
+    with pytest.raises(ParserError):
+        parse_code(code)
+
+
+# -------------------------------------------------------------
+# 5. Built-in Function Call Parser Tests (Phase 7.2)
+# -------------------------------------------------------------
+
+def test_parse_builtin_function_calls():
+    """Verify parsing of built-in function calls."""
+    from ruleflow.ast.nodes import FunctionCallNode
+
+    code = """
+    RULE FunctionTest:
+        a = ABS(-10)
+        b = MIN(10, 20)
+        c = MAX(10, 20)
+        d = ROUND(12.6)
+        e = LENGTH("RuleFlow")
+    END
+    """
+    ast = parse_code(code)
+    body = ast.statements[0].body
+    assert len(body) == 5
+
+    # a = ABS(-10)
+    assert isinstance(body[0].value, FunctionCallNode)
+    assert body[0].value.name == "ABS"
+    assert len(body[0].value.args) == 1
+
+    # b = MIN(10, 20)
+    assert isinstance(body[1].value, FunctionCallNode)
+    assert body[1].value.name == "MIN"
+    assert len(body[1].value.args) == 2
+
+    # c = MAX(10, 20)
+    assert isinstance(body[2].value, FunctionCallNode)
+    assert body[2].value.name == "MAX"
+    assert len(body[2].value.args) == 2
+
+    # d = ROUND(12.6)
+    assert isinstance(body[3].value, FunctionCallNode)
+    assert body[3].value.name == "ROUND"
+    assert len(body[3].value.args) == 1
+
+    # e = LENGTH("RuleFlow")
+    assert isinstance(body[4].value, FunctionCallNode)
+    assert body[4].value.name == "LENGTH"
+    assert len(body[4].value.args) == 1
+
+
+def test_parse_nested_function_calls():
+    """Verify parsing of nested function calls and complex arguments."""
+    from ruleflow.ast.nodes import FunctionCallNode, BinaryOpNode
+
+    code = """
+    RULE NestedFunctions:
+        res = ABS(MIN(MAX(1, 2), -5)) + ROUND(10.5 * 2.0)
+    END
+    """
+    ast = parse_code(code)
+    stmt = ast.statements[0].body[0]
+    assert isinstance(stmt.value, BinaryOpNode)
+    assert stmt.value.op == "+"
+    assert isinstance(stmt.value.left, FunctionCallNode)
+    assert stmt.value.left.name == "ABS"
+    assert isinstance(stmt.value.left.args[0], FunctionCallNode)
+    assert stmt.value.left.args[0].name == "MIN"
+
+
+def test_function_call_node_methods():
+    """Verify FunctionCallNode to_dict, pretty, and repr methods."""
+    from ruleflow.ast.nodes import FunctionCallNode, LiteralNode
+
+    fn_node = FunctionCallNode(
+        name="ABS",
+        args=[LiteralNode(value=-5, literal_type="INTEGER", line=1, column=5)],
+        line=1,
+        column=1,
+    )
+    d = fn_node.to_dict()
+    assert d["node_type"] == "FunctionCallNode"
+    assert d["name"] == "ABS"
+    assert len(d["args"]) == 1
+    assert "FunctionCallNode: 'ABS'" in fn_node.pretty()
+    assert repr(fn_node).startswith("FunctionCallNode(name='ABS'")
+

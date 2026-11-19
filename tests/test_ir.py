@@ -220,3 +220,107 @@ def test_multiple_rules_and_boundaries():
     assert boundaries[1].name == "RuleOne" and not boundaries[1].is_start
     assert boundaries[2].name == "RuleTwo" and boundaries[2].is_start
     assert boundaries[3].name == "RuleTwo" and not boundaries[3].is_start
+
+
+# -------------------------------------------------------------
+# Tests 11-12: ELSE IF TAC Generation
+# -------------------------------------------------------------
+
+def test_ir_multiple_else_if_branches():
+    """Test 11: TAC generation for chained ELSE IF statements with final ELSE."""
+    code = """
+    RULE GradeEval:
+        IF marks >= 90 THEN
+            grade = "A"
+        ELSE IF marks >= 75 THEN
+            grade = "B"
+        ELSE
+            grade = "C"
+        END
+    END
+    """
+    ir = generate_ir(code)
+    jumps_if_false = [inst for inst in ir if isinstance(inst, JumpIfFalseInstruction)]
+    gotos = [inst for inst in ir if isinstance(inst, JumpInstruction)]
+    labels = [inst.label for inst in ir if isinstance(inst, LabelInstruction)]
+
+    # Two condition checks: IF marks >= 90 and ELSE IF marks >= 75
+    assert len(jumps_if_false) == 2
+    # Two branches (THEN and ELIF) jump to end label
+    assert len(gotos) == 2
+    # Labels: L_elif, L_else, L_end
+    assert len(labels) == 3
+    # All labels must be unique
+    assert len(labels) == len(set(labels))
+    # Every jump target exists as a label
+    for j in jumps_if_false:
+        assert j.target_label in labels
+    for g in gotos:
+        assert g.target_label in labels
+
+
+def test_ir_else_if_without_else():
+    """Test 12: TAC generation for ELSE IF without a final ELSE branch."""
+    code = """
+    RULE NoElse:
+        IF x == 1 THEN
+            y = 10
+        ELSE IF x == 2 THEN
+            y = 20
+        END
+    END
+    """
+    ir = generate_ir(code)
+    jumps_if_false = [inst for inst in ir if isinstance(inst, JumpIfFalseInstruction)]
+    labels = [inst.label for inst in ir if isinstance(inst, LabelInstruction)]
+
+    assert len(jumps_if_false) == 2
+    # Labels: L_elif and L_end
+    assert len(labels) == 2
+    for j in jumps_if_false:
+        assert j.target_label in labels
+
+
+def test_ir_builtin_function_calls():
+    """Test 13: TAC generation for built-in function calls."""
+    from ruleflow.ir.instructions import FunctionCallInstruction
+
+    code = """
+    RULE BuiltinsIR:
+        x = ABS(-5)
+        m = MIN(x, 10)
+        len = LENGTH("test")
+    END
+    """
+    ir = generate_ir(code)
+    fn_calls = [inst for inst in ir if isinstance(inst, FunctionCallInstruction)]
+    assert len(fn_calls) == 3
+
+    assert fn_calls[0].func_name == "ABS"
+    assert fn_calls[1].func_name == "MIN"
+    assert fn_calls[2].func_name == "LENGTH"
+
+    # Check to_dict and str
+    d = fn_calls[0].to_dict()
+    assert d["type"] == "FunctionCallInstruction"
+    assert d["op"] == "CALL ABS"
+    assert "ABS" in str(fn_calls[0])
+
+
+def test_ir_nested_function_calls():
+    """Test 14: TAC generation for nested function calls."""
+    from ruleflow.ir.instructions import FunctionCallInstruction
+
+    code = """
+    RULE NestedIR:
+        res = ROUND(MIN(10.5, 20.0))
+    END
+    """
+    ir = generate_ir(code)
+    fn_calls = [inst for inst in ir if isinstance(inst, FunctionCallInstruction)]
+    assert len(fn_calls) == 2
+    # Inner call is MIN, outer is ROUND
+    assert fn_calls[0].func_name == "MIN"
+    assert fn_calls[1].func_name == "ROUND"
+    assert fn_calls[1].args[0] == fn_calls[0].target
+

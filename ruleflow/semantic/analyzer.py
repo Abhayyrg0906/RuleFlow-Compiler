@@ -18,6 +18,7 @@ from ruleflow.ast.nodes import (
     UnaryOpNode,
     LiteralNode,
     IdentifierNode,
+    FunctionCallNode,
 )
 from .types import DataType
 from .symbol_table import SymbolTable, Symbol
@@ -153,14 +154,31 @@ class SemanticAnalyzer:
                 column=node.condition.column,
             )
 
-        # 2. Analyze THEN branch in a branched scope
         base_table = self.current_symbol_table
+
+        # 2. Analyze THEN branch in an isolated branched scope
         then_table = base_table.copy()
         self.current_symbol_table = then_table
         for stmt in node.then_branch:
             self.analyze_statement(stmt)
 
-        # 3. Analyze ELSE branch (if present) in an isolated branched scope
+        # 3. Analyze each ELSE IF branch in an isolated branched scope
+        elif_tables: List[SymbolTable] = []
+        for elif_node in node.elif_branches:
+            elif_cond_type = self.analyze_expression(elif_node.condition)
+            if elif_cond_type != DataType.BOOLEAN:
+                raise SemanticError(
+                    f"ELSE IF condition must evaluate to BOOLEAN, got {elif_cond_type.value}",
+                    line=elif_node.condition.line,
+                    column=elif_node.condition.column,
+                )
+            elif_table = base_table.copy()
+            self.current_symbol_table = elif_table
+            for stmt in elif_node.body:
+                self.analyze_statement(stmt)
+            elif_tables.append(elif_table)
+
+        # 4. Analyze ELSE branch (if present) in an isolated branched scope
         else_table: Optional[SymbolTable] = None
         if node.else_branch:
             else_table = base_table.copy()
@@ -171,47 +189,54 @@ class SemanticAnalyzer:
         # Restore base scope
         self.current_symbol_table = base_table
 
-        # 4. Definite assignment merge:
-        # A variable introduced inside the IF is only definitely assigned afterward
-        # if it is assigned in BOTH branches with compatible types.
+        # 5. Definite assignment merge:
+        # A variable introduced inside the conditional is only definitely assigned afterward
+        # if it is assigned in ALL possible branches (THEN, all ELSE IFs, and ELSE) with compatible types.
         if else_table is not None:
-            for var_name, then_sym in list(then_table.symbols.items()):
-                if var_name in else_table.symbols:
-                    else_sym = else_table.symbols[var_name]
+            all_branch_tables = [then_table] + elif_tables + [else_table]
 
-                    # Resolve merged type
-                    if then_sym.data_type == else_sym.data_type:
-                        merged_type = then_sym.data_type
-                    elif then_sym.data_type == DataType.INTEGER and else_sym.data_type == DataType.DECIMAL:
+            candidate_vars = set(then_table.symbols.keys())
+            for branch_tbl in all_branch_tables[1:]:
+                candidate_vars &= set(branch_tbl.symbols.keys())
+
+            for var_name in candidate_vars:
+                first_sym = then_table.symbols[var_name]
+                merged_type = first_sym.data_type
+
+                for branch_tbl in all_branch_tables[1:]:
+                    branch_sym = branch_tbl.symbols[var_name]
+                    if merged_type == branch_sym.data_type:
+                        continue
+                    elif merged_type == DataType.INTEGER and branch_sym.data_type == DataType.DECIMAL:
                         merged_type = DataType.DECIMAL
-                    elif then_sym.data_type == DataType.DECIMAL and else_sym.data_type == DataType.INTEGER:
+                    elif merged_type == DataType.DECIMAL and branch_sym.data_type == DataType.INTEGER:
                         merged_type = DataType.DECIMAL
                     else:
                         raise SemanticError(
-                            f"Variable '{var_name}' assigned with incompatible types in IF ({then_sym.data_type.value}) and ELSE ({else_sym.data_type.value}) branches",
+                            f"Variable '{var_name}' assigned with incompatible types across branches",
                             line=node.line,
                             column=node.column,
                             identifier=var_name,
                         )
 
-                    # Update or define in base scope
-                    existing_base = base_table.lookup(var_name)
-                    if existing_base is not None:
-                        if not existing_base.data_type.is_compatible_with(merged_type):
-                            raise SemanticError(
-                                f"Cannot assign {merged_type.value} to {existing_base.data_type.value} variable '{var_name}'",
-                                line=node.line,
-                                column=node.column,
-                                identifier=var_name,
-                            )
-                    else:
-                        base_table.define(
-                            name=var_name,
-                            data_type=merged_type,
-                            is_input=False,
-                            line=then_sym.line,
-                            column=then_sym.column,
+                # Update or define in base scope
+                existing_base = base_table.lookup(var_name)
+                if existing_base is not None:
+                    if not existing_base.data_type.is_compatible_with(merged_type):
+                        raise SemanticError(
+                            f"Cannot assign {merged_type.value} to {existing_base.data_type.value} variable '{var_name}'",
+                            line=node.line,
+                            column=node.column,
+                            identifier=var_name,
                         )
+                else:
+                    base_table.define(
+                        name=var_name,
+                        data_type=merged_type,
+                        is_input=False,
+                        line=first_sym.line,
+                        column=first_sym.column,
+                    )
 
     def analyze_expression(self, node: ASTNode) -> DataType:
         """Infer and validate the data type of an expression node."""
@@ -247,6 +272,106 @@ class SemanticAnalyzer:
                     identifier=node.name,
                 )
             return sym.data_type
+
+        if isinstance(node, FunctionCallNode):
+            func_name = node.name.upper()
+            if func_name not in ("ABS", "MIN", "MAX", "ROUND", "LENGTH"):
+                raise SemanticError(
+                    f"Unknown function '{node.name}'",
+                    line=node.line,
+                    column=node.column,
+                )
+
+            # 1. ABS(value): 1 numeric argument -> returns numeric type of argument
+            if func_name == "ABS":
+                if len(node.args) != 1:
+                    raise SemanticError(
+                        f"Function 'ABS' requires exactly 1 argument, got {len(node.args)}",
+                        line=node.line,
+                        column=node.column,
+                    )
+                arg_type = self.analyze_expression(node.args[0])
+                if not arg_type.is_numeric():
+                    raise SemanticError(
+                        f"Function 'ABS' requires a numeric argument, got {arg_type.value}",
+                        line=node.line,
+                        column=node.column,
+                    )
+                return arg_type
+
+            # 2. MIN(a, b): 2 numeric arguments -> returns DECIMAL if either is DECIMAL, else INTEGER
+            if func_name == "MIN":
+                if len(node.args) != 2:
+                    raise SemanticError(
+                        f"Function 'MIN' requires exactly 2 arguments, got {len(node.args)}",
+                        line=node.line,
+                        column=node.column,
+                    )
+                t1 = self.analyze_expression(node.args[0])
+                t2 = self.analyze_expression(node.args[1])
+                if not (t1.is_numeric() and t2.is_numeric()):
+                    raise SemanticError(
+                        f"Function 'MIN' requires numeric arguments, got {t1.value} and {t2.value}",
+                        line=node.line,
+                        column=node.column,
+                    )
+                if t1 == DataType.DECIMAL or t2 == DataType.DECIMAL:
+                    return DataType.DECIMAL
+                return DataType.INTEGER
+
+            # 3. MAX(a, b): 2 numeric arguments -> returns DECIMAL if either is DECIMAL, else INTEGER
+            if func_name == "MAX":
+                if len(node.args) != 2:
+                    raise SemanticError(
+                        f"Function 'MAX' requires exactly 2 arguments, got {len(node.args)}",
+                        line=node.line,
+                        column=node.column,
+                    )
+                t1 = self.analyze_expression(node.args[0])
+                t2 = self.analyze_expression(node.args[1])
+                if not (t1.is_numeric() and t2.is_numeric()):
+                    raise SemanticError(
+                        f"Function 'MAX' requires numeric arguments, got {t1.value} and {t2.value}",
+                        line=node.line,
+                        column=node.column,
+                    )
+                if t1 == DataType.DECIMAL or t2 == DataType.DECIMAL:
+                    return DataType.DECIMAL
+                return DataType.INTEGER
+
+            # 4. ROUND(value): 1 numeric argument -> returns INTEGER
+            if func_name == "ROUND":
+                if len(node.args) != 1:
+                    raise SemanticError(
+                        f"Function 'ROUND' requires exactly 1 argument, got {len(node.args)}",
+                        line=node.line,
+                        column=node.column,
+                    )
+                arg_type = self.analyze_expression(node.args[0])
+                if not arg_type.is_numeric():
+                    raise SemanticError(
+                        f"Function 'ROUND' requires a numeric argument, got {arg_type.value}",
+                        line=node.line,
+                        column=node.column,
+                    )
+                return DataType.INTEGER
+
+            # 5. LENGTH(text): 1 STRING argument -> returns INTEGER
+            if func_name == "LENGTH":
+                if len(node.args) != 1:
+                    raise SemanticError(
+                        f"Function 'LENGTH' requires exactly 1 argument, got {len(node.args)}",
+                        line=node.line,
+                        column=node.column,
+                    )
+                arg_type = self.analyze_expression(node.args[0])
+                if arg_type != DataType.STRING:
+                    raise SemanticError(
+                        f"Function 'LENGTH' requires a STRING argument, got {arg_type.value}",
+                        line=node.line,
+                        column=node.column,
+                    )
+                return DataType.INTEGER
 
         if isinstance(node, UnaryOpNode):
             operand_type = self.analyze_expression(node.operand)

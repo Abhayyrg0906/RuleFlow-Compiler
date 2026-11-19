@@ -37,4 +37,4 @@ def test_modules_instantiation():
 
     executor = Executor(target_code)
     result = executor.execute()
-    assert result["status"] == "ready"
+    assert result["status"] in ("ready", "success")

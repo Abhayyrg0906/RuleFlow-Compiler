@@ -5,11 +5,13 @@ from .nodes import (
     ProgramNode,
     RuleDeclarationNode,
     IfStatementNode,
+    ElseIfNode,
     AssignmentNode,
     BinaryOpNode,
     UnaryOpNode,
     LiteralNode,
     IdentifierNode,
+    FunctionCallNode,
 )
 
 __all__ = [
@@ -17,9 +19,11 @@ __all__ = [
     "ProgramNode",
     "RuleDeclarationNode",
     "IfStatementNode",
+    "ElseIfNode",
     "AssignmentNode",
     "BinaryOpNode",
     "UnaryOpNode",
     "LiteralNode",
     "IdentifierNode",
+    "FunctionCallNode",
 ]

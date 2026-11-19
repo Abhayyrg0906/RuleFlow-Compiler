@@ -1,0 +1,9 @@
+// Example: Built-in function demonstrations in RuleFlow
+RULE BuiltinFunctionsDemo:
+    abs_val = ABS(-42)
+    min_val = MIN(score, 100)
+    max_val = MAX(score, 0)
+    rounded_rate = ROUND(tax_rate)
+    name_len = LENGTH(student_name)
+    combined = ABS(min_val - max_val) + ROUND(12.7)
+END

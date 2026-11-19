@@ -21,6 +21,7 @@ from ruleflow.ir.instructions import (
     JumpIfFalseInstruction,
     JumpIfTrueInstruction,
     RuleBoundaryInstruction,
+    FunctionCallInstruction,
 )
 
 
@@ -181,6 +182,25 @@ class Optimizer:
                 known_constants.pop(inst.target, None)
                 continue
 
+            if isinstance(inst, FunctionCallInstruction):
+                new_args = [
+                    known_constants.get(arg, arg) if isinstance(arg, str) else arg
+                    for arg in inst.args
+                ]
+                if new_args != inst.args:
+                    new_instructions.append(
+                        FunctionCallInstruction(inst.target, inst.func_name, new_args)
+                    )
+                    self.transformations.append(
+                        f"Propagated operands into: {inst.target} = {inst.func_name}({', '.join(str(a) for a in new_args)})"
+                    )
+                    changed = True
+                else:
+                    new_instructions.append(inst)
+
+                known_constants.pop(inst.target, None)
+                continue
+
             new_instructions.append(inst)
 
         return new_instructions, changed
@@ -226,6 +246,20 @@ class Optimizer:
                         )
                         self.transformations.append(
                             f"Constant folded: {op} {val} -> {folded_val} ({inst.target})"
+                        )
+                        changed = True
+                        continue
+
+            elif isinstance(inst, FunctionCallInstruction):
+                if all(isinstance(arg, Constant) for arg in inst.args):
+                    arg_values = [arg.value for arg in inst.args]
+                    folded_val = self._evaluate_function_call(inst.func_name, arg_values)
+                    if folded_val is not None:
+                        new_instructions.append(
+                            AssignInstruction(inst.target, Constant(folded_val))
+                        )
+                        self.transformations.append(
+                            f"Constant folded: {inst.func_name}({', '.join(str(v) for v in arg_values)}) -> {folded_val} ({inst.target})"
                         )
                         changed = True
                         continue
@@ -316,6 +350,29 @@ class Optimizer:
                 return not val
         return None
 
+    def _evaluate_function_call(self, func_name: str, args: List[Any]) -> Optional[Any]:
+        """Safely evaluate a built-in function call on constant literal values."""
+        fn = func_name.upper()
+        if fn == "ABS":
+            if len(args) == 1 and isinstance(args[0], (int, float)) and not isinstance(args[0], bool):
+                res = abs(args[0])
+                return float(res) if isinstance(args[0], float) else int(res)
+        elif fn == "MIN":
+            if len(args) == 2 and all(isinstance(a, (int, float)) and not isinstance(a, bool) for a in args):
+                res = min(args[0], args[1])
+                return float(res) if any(isinstance(a, float) for a in args) else int(res)
+        elif fn == "MAX":
+            if len(args) == 2 and all(isinstance(a, (int, float)) and not isinstance(a, bool) for a in args):
+                res = max(args[0], args[1])
+                return float(res) if any(isinstance(a, float) for a in args) else int(res)
+        elif fn == "ROUND":
+            if len(args) == 1 and isinstance(args[0], (int, float)) and not isinstance(args[0], bool):
+                return int(round(args[0]))
+        elif fn == "LENGTH":
+            if len(args) == 1 and isinstance(args[0], str):
+                return len(args[0])
+        return None
+
     # -------------------------------------------------------------
     # Pass 3: Dead Code Elimination
     # -------------------------------------------------------------
@@ -341,13 +398,17 @@ class Optimizer:
             elif isinstance(inst, (JumpIfFalseInstruction, JumpIfTrueInstruction)):
                 if isinstance(inst.condition, str):
                     used_vars.add(inst.condition)
+            elif isinstance(inst, FunctionCallInstruction):
+                for arg in inst.args:
+                    if isinstance(arg, str):
+                        used_vars.add(arg)
 
         new_instructions: List[Instruction] = []
         changed = False
 
         for inst in instructions:
             # Check if this instruction defines an unused temporary variable (e.g. t1, t2)
-            if isinstance(inst, (AssignInstruction, BinaryOpInstruction, UnaryOpInstruction)):
+            if isinstance(inst, (AssignInstruction, BinaryOpInstruction, UnaryOpInstruction, FunctionCallInstruction)):
                 target = inst.target
                 if self._is_temporary(target) and target not in used_vars:
                     # Do not remove division/modulo by zero (potentially unsafe operation)

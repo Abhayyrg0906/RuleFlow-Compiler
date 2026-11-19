@@ -12,11 +12,13 @@ from ruleflow.ast.nodes import (
     ProgramNode,
     RuleDeclarationNode,
     IfStatementNode,
+    ElseIfNode,
     AssignmentNode,
     BinaryOpNode,
     UnaryOpNode,
     LiteralNode,
     IdentifierNode,
+    FunctionCallNode,
 )
 from .errors import ParserError
 
@@ -148,10 +150,13 @@ class Parser:
         )
 
     def parse_if(self) -> IfStatementNode:
-        """Parse an IF conditional statement.
+        """Parse an IF conditional statement with optional ELSE IF and ELSE branches.
 
         Grammar:
-            if_statement ::= IF expression THEN statement* (ELSE statement*)? END
+            if_statement ::= IF expression THEN statement*
+                             (ELSE IF expression THEN statement*)*
+                             (ELSE statement*)?
+                             END
         """
         if_tok = self.expect(TokenType.IF, "Expected 'IF' keyword")
         condition = self.parse_expression()
@@ -161,6 +166,26 @@ class Parser:
         while not self.check(TokenType.ELSE, TokenType.END, TokenType.EOF, TokenType.RULE):
             then_branch.append(self.parse_statement())
 
+        elif_branches: List[ElseIfNode] = []
+        # Support zero or more ELSE IF branches
+        while self.check(TokenType.ELSE) and self.peek().type == TokenType.IF:
+            else_tok = self.advance()  # consume ELSE
+            self.advance()  # consume IF
+            elif_cond = self.parse_expression()
+            self.expect(TokenType.THEN, "Expected 'THEN' after ELSE IF condition")
+            elif_body: List[ASTNode] = []
+            while not self.check(TokenType.ELSE, TokenType.END, TokenType.EOF, TokenType.RULE):
+                elif_body.append(self.parse_statement())
+            elif_branches.append(
+                ElseIfNode(
+                    condition=elif_cond,
+                    body=elif_body,
+                    line=else_tok.line,
+                    column=else_tok.column,
+                )
+            )
+
+        # Optional final ELSE branch
         else_branch: List[ASTNode] = []
         if self.match(TokenType.ELSE):
             while not self.check(TokenType.END, TokenType.EOF, TokenType.RULE):
@@ -172,6 +197,7 @@ class Parser:
             condition=condition,
             then_branch=then_branch,
             else_branch=else_branch,
+            elif_branches=elif_branches,
             line=if_tok.line,
             column=if_tok.column,
         )
@@ -346,8 +372,26 @@ class Parser:
         if self.match(TokenType.STRING):
             return LiteralNode(value=tok.value, literal_type="STRING", line=tok.line, column=tok.column)
 
-        if self.match(TokenType.IDENTIFIER):
-            return IdentifierNode(name=tok.value, line=tok.line, column=tok.column)
+        if self.check(TokenType.IDENTIFIER):
+            id_tok = self.advance()
+            # Check if this identifier is the start of a function call: name(...)
+            if self.match(TokenType.LPAREN):
+                args: List[ASTNode] = []
+                if not self.check(TokenType.RPAREN):
+                    args.append(self.parse_expression())
+                    while self.match(TokenType.COMMA):
+                        args.append(self.parse_expression())
+                self.expect(
+                    TokenType.RPAREN,
+                    f"Expected ')' to close arguments for function '{id_tok.value}'",
+                )
+                return FunctionCallNode(
+                    name=id_tok.value,
+                    args=args,
+                    line=id_tok.line,
+                    column=id_tok.column,
+                )
+            return IdentifierNode(name=id_tok.value, line=id_tok.line, column=id_tok.column)
 
         if self.match(TokenType.LPAREN):
             opening_paren = tok

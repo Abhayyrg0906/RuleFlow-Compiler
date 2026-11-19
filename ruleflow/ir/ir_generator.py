@@ -15,6 +15,7 @@ from ruleflow.ast.nodes import (
     UnaryOpNode,
     LiteralNode,
     IdentifierNode,
+    FunctionCallNode,
 )
 from .instructions import (
     Instruction,
@@ -27,6 +28,7 @@ from .instructions import (
     JumpIfFalseInstruction,
     JumpIfTrueInstruction,
     RuleBoundaryInstruction,
+    FunctionCallInstruction,
 )
 
 
@@ -100,29 +102,45 @@ class IRGenerator:
         self.emit(AssignInstruction(target=node.target, source=val))
 
     def generate_if(self, node: IfStatementNode) -> None:
-        """Generate control-flow IR for conditional IF-THEN and IF-THEN-ELSE statements."""
+        """Generate control-flow IR for conditional IF-THEN, IF-THEN-ELSE IF, and IF-THEN-ELSE statements."""
+        end_label = self.new_label("L_end")
+        has_elifs = bool(node.elif_branches)
+        has_else = bool(node.else_branch)
+
+        # Pre-allocate labels for each subsequent branch
+        elif_labels = [self.new_label("L_elif") for _ in node.elif_branches]
+        else_label = self.new_label("L_else") if has_else else None
+
+        # 1. Initial IF branch
+        next_target = elif_labels[0] if has_elifs else (else_label if has_else else end_label)
         cond_val = self.generate_expression(node.condition)
-
-        if node.else_branch:
-            else_label = self.new_label("L_else")
-            end_label = self.new_label("L_end")
-
-            self.emit(JumpIfFalseInstruction(condition=cond_val, target_label=else_label))
-            for stmt in node.then_branch:
-                self.generate_statement(stmt)
+        self.emit(JumpIfFalseInstruction(condition=cond_val, target_label=next_target))
+        for stmt in node.then_branch:
+            self.generate_statement(stmt)
+        if has_elifs or has_else:
             self.emit(JumpInstruction(target_label=end_label))
 
+        # 2. Chained ELSE IF branches
+        for i, elif_node in enumerate(node.elif_branches):
+            self.emit(LabelInstruction(label=elif_labels[i]))
+            is_last_branch = (i == len(node.elif_branches) - 1) and not has_else
+            next_target = elif_labels[i + 1] if i + 1 < len(node.elif_branches) else (else_label if has_else else end_label)
+
+            elif_cond_val = self.generate_expression(elif_node.condition)
+            self.emit(JumpIfFalseInstruction(condition=elif_cond_val, target_label=next_target))
+            for stmt in elif_node.body:
+                self.generate_statement(stmt)
+            if not is_last_branch:
+                self.emit(JumpInstruction(target_label=end_label))
+
+        # 3. Final ELSE branch (if present)
+        if has_else and else_label is not None:
             self.emit(LabelInstruction(label=else_label))
             for stmt in node.else_branch:
                 self.generate_statement(stmt)
-            self.emit(LabelInstruction(label=end_label))
-        else:
-            end_label = self.new_label("L_end")
 
-            self.emit(JumpIfFalseInstruction(condition=cond_val, target_label=end_label))
-            for stmt in node.then_branch:
-                self.generate_statement(stmt)
-            self.emit(LabelInstruction(label=end_label))
+        # 4. End label converging all branches
+        self.emit(LabelInstruction(label=end_label))
 
     def generate_expression(self, node: ASTNode) -> Any:
         """Generate TAC for an expression node, returning the result operand."""
@@ -131,6 +149,12 @@ class IRGenerator:
 
         if isinstance(node, IdentifierNode):
             return node.name
+
+        if isinstance(node, FunctionCallNode):
+            arg_vals = [self.generate_expression(arg) for arg in node.args]
+            temp = self.new_temp()
+            self.emit(FunctionCallInstruction(target=temp, func_name=node.name.upper(), args=arg_vals))
+            return temp
 
         if isinstance(node, UnaryOpNode):
             operand_val = self.generate_expression(node.operand)

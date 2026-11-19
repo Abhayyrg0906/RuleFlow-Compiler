@@ -548,3 +548,279 @@ def test_program_with_no_executable_instructions():
     assert res.outputs == {}
     assert res.steps > 0
     assert res.error is None
+
+
+# -------------------------------------------------------------
+# Tests 30-35: ELSE IF Execution Tests
+# -------------------------------------------------------------
+
+def test_execution_single_else_if_branch():
+    """Test 30: Execution with a single ELSE IF branch."""
+    code = """
+    RULE SingleElif:
+        IF x > 10 THEN
+            y = 1
+        ELSE IF x > 5 THEN
+            y = 2
+        ELSE
+            y = 3
+        END
+    END
+    """
+    # x = 7 -> triggers ELSE IF branch
+    res = run_pipeline(code, inputs={"x": 7}, input_types={"x": "INTEGER"})
+    assert res.status == "success"
+    assert res.outputs["y"] == 2
+
+
+def test_execution_multiple_else_if_all_paths():
+    """Test 31: Execution of multi-branch ELSE IF covering first, middle, last, and ELSE paths."""
+    code = """
+    RULE MultiPath:
+        IF marks >= 90 THEN
+            grade = "A"
+        ELSE IF marks >= 75 THEN
+            grade = "B"
+        ELSE IF marks >= 60 THEN
+            grade = "C"
+        ELSE
+            grade = "F"
+        END
+    END
+    """
+    # 1. First condition true (marks = 95 -> A)
+    r1 = run_pipeline(code, inputs={"marks": 95}, input_types={"marks": "INTEGER"})
+    assert r1.status == "success"
+    assert r1.outputs["grade"] == "A"
+
+    # 2. Middle condition true (marks = 80 -> B)
+    r2 = run_pipeline(code, inputs={"marks": 80}, input_types={"marks": "INTEGER"})
+    assert r2.status == "success"
+    assert r2.outputs["grade"] == "B"
+
+    # 3. Last condition true (marks = 65 -> C)
+    r3 = run_pipeline(code, inputs={"marks": 65}, input_types={"marks": "INTEGER"})
+    assert r3.status == "success"
+    assert r3.outputs["grade"] == "C"
+
+    # 4. All conditions false (marks = 45 -> F)
+    r4 = run_pipeline(code, inputs={"marks": 45}, input_types={"marks": "INTEGER"})
+    assert r4.status == "success"
+    assert r4.outputs["grade"] == "F"
+
+
+def test_execution_else_if_without_else():
+    """Test 32: Execution of ELSE IF branches without a final ELSE."""
+    code = """
+    RULE NoFinalElse:
+        flag = 0
+        IF val == 1 THEN
+            flag = 10
+        ELSE IF val == 2 THEN
+            flag = 20
+        END
+    END
+    """
+    # 1. Matching second condition (val = 2 -> flag = 20)
+    r1 = run_pipeline(code, inputs={"val": 2}, input_types={"val": "INTEGER"})
+    assert r1.status == "success"
+    assert r1.outputs["flag"] == 20
+
+    # 2. No condition matches (val = 99 -> flag remains 0)
+    r2 = run_pipeline(code, inputs={"val": 99}, input_types={"val": "INTEGER"})
+    assert r2.status == "success"
+    assert r2.outputs["flag"] == 0
+
+
+def test_execution_nested_else_if():
+    """Test 33: Execution of nested ELSE IF statements."""
+    code = """
+    RULE NestedElif:
+        category = "Unknown"
+        IF level == 1 THEN
+            category = "Tier 1"
+        ELSE IF level == 2 THEN
+            IF score >= 50 THEN
+                category = "Tier 2 High"
+            ELSE IF score >= 25 THEN
+                category = "Tier 2 Medium"
+            ELSE
+                category = "Tier 2 Low"
+            END
+        ELSE
+            category = "Other"
+        END
+    END
+    """
+    res = run_pipeline(
+        code,
+        inputs={"level": 2, "score": 30},
+        input_types={"level": "INTEGER", "score": "INTEGER"},
+    )
+    assert res.status == "success"
+    assert res.outputs["category"] == "Tier 2 Medium"
+
+
+def test_execution_else_if_optimized_unoptimized_equivalence():
+    """Test 34: Equivalence between optimized and unoptimized execution of ELSE IF."""
+    code = """
+    RULE EquivTest:
+        base = 100
+        IF score >= 90 THEN
+            bonus = 50 + 10 * 2
+            total = base + bonus
+        ELSE IF score >= 70 THEN
+            bonus = 20 + 5 * 2
+            total = base + bonus
+        ELSE
+            bonus = 0
+            total = base
+        END
+    END
+    """
+    for sc in [95, 80, 50]:
+        res_opt = run_pipeline(code, inputs={"score": sc}, input_types={"score": "INTEGER"}, optimize=True)
+        res_unopt = run_pipeline(code, inputs={"score": sc}, input_types={"score": "INTEGER"}, optimize=False)
+        assert res_opt.status == "success"
+        assert res_unopt.status == "success"
+        assert res_opt.outputs == res_unopt.outputs
+
+
+def test_execution_grade_evaluation_example_file():
+    """Test 35: Validate examples/grade_evaluation.rf for marks 95, 82, 65, 40."""
+    path = Path(__file__).parent.parent / "examples" / "grade_evaluation.rf"
+    code = path.read_text(encoding="utf-8")
+
+    expected_grades = {
+        95: "A",
+        82: "B",
+        65: "C",
+        40: "F",
+    }
+
+    for marks_val, expected_grade in expected_grades.items():
+        res = run_pipeline(
+            code,
+            inputs={"marks": marks_val},
+            input_types={"marks": "INTEGER"},
+        )
+        assert res.status == "success"
+        assert res.outputs["grade"] == expected_grade
+        assert res.outputs["marks"] == marks_val
+
+
+# -------------------------------------------------------------
+# 6. Built-in Function Execution Tests (Phase 7.2)
+# -------------------------------------------------------------
+
+def test_execution_all_builtin_functions():
+    """Test 36: Execute all five built-in functions with dynamic inputs."""
+    code = """
+    RULE BuiltinsExec:
+        res_abs1 = ABS(val_neg)
+        res_abs2 = ABS(val_dec_neg)
+        res_min1 = MIN(a, b)
+        res_min2 = MIN(a, dec_val)
+        res_max1 = MAX(a, b)
+        res_max2 = MAX(a, dec_val)
+        res_round1 = ROUND(round_up)
+        res_round2 = ROUND(round_down)
+        res_len = LENGTH(text)
+    END
+    """
+    inputs = {
+        "val_neg": -50,
+        "val_dec_neg": -12.5,
+        "a": 10,
+        "b": 20,
+        "dec_val": 5.5,
+        "round_up": 3.7,
+        "round_down": 3.2,
+        "text": "Antigravity",
+    }
+    input_types = {
+        "val_neg": "INTEGER",
+        "val_dec_neg": "DECIMAL",
+        "a": "INTEGER",
+        "b": "INTEGER",
+        "dec_val": "DECIMAL",
+        "round_up": "DECIMAL",
+        "round_down": "DECIMAL",
+        "text": "STRING",
+    }
+
+    for opt in [False, True]:
+        res = run_pipeline(code, inputs=inputs, input_types=input_types, optimize=opt)
+        assert res.status == "success"
+        out = res.outputs
+        assert out["res_abs1"] == 50
+        assert out["res_abs2"] == 12.5
+        assert out["res_min1"] == 10
+        assert out["res_min2"] == 5.5
+        assert out["res_max1"] == 20
+        assert out["res_max2"] == 10.0
+        assert out["res_round1"] == 4
+        assert out["res_round2"] == 3
+        assert out["res_len"] == 11
+
+
+def test_execution_nested_builtins_with_expressions():
+    """Test 37: Execute nested built-ins within arithmetic expressions."""
+    code = """
+    RULE NestedMath:
+        res = ABS(MIN(x, y) - MAX(x, y)) * ROUND(factor + 0.1)
+    END
+    """
+    inputs = {"x": 10, "y": 25, "factor": 2.4}
+    input_types = {"x": "INTEGER", "y": "INTEGER", "factor": "DECIMAL"}
+
+    res = run_pipeline(code, inputs=inputs, input_types=input_types)
+    assert res.status == "success"
+    # |10 - 25| * round(2.5) -> 15 * 2 (or 3, round(2.5) in Python is 2, round(2.51) is 3)
+    # factor = 2.4 + 0.1 = 2.5. Note round(2.5) in Python 3 banker's rounding is 2.
+    # 15 * 2 = 30
+    assert res.outputs["res"] == 15 * round(2.4 + 0.1)
+
+
+def test_execution_builtin_functions_example_file():
+    """Test 38: Execute examples/builtin_functions.rf end-to-end."""
+    path = Path(__file__).parent.parent / "examples" / "builtin_functions.rf"
+    code = path.read_text(encoding="utf-8")
+
+    inputs = {
+        "score": 85,
+        "tax_rate": 18.75,
+        "student_name": "RuleFlow",
+    }
+    input_types = {
+        "score": "INTEGER",
+        "tax_rate": "DECIMAL",
+        "student_name": "STRING",
+    }
+
+    res = run_pipeline(code, inputs=inputs, input_types=input_types, optimize=True)
+    assert res.status == "success"
+    out = res.outputs
+    assert out["abs_val"] == 42
+    assert out["min_val"] == 85
+    assert out["max_val"] == 85
+    assert out["rounded_rate"] == 19
+    assert out["name_len"] == 8
+    # combined: ABS(85 - 85) + ROUND(12.7) -> 0 + 13 = 13
+    assert out["combined"] == 13
+
+
+def test_execution_builtin_function_runtime_errors():
+    """Test 39: Directly invoke interpreter with invalid types to verify runtime safeguards."""
+    from ruleflow.ir.instructions import FunctionCallInstruction
+    from ruleflow.execution.interpreter import TACInterpreter
+
+    # ABS with invalid string type
+    ir = [FunctionCallInstruction(target="t1", func_name="ABS", args=["bad_val"])]
+    env = RuntimeEnvironment()
+    env.set_input("bad_val", "not_a_number")
+    interp = TACInterpreter(ir, environment=env)
+    res = interp.execute()
+    assert res.status == "failed"
+    assert "Function ABS requires exactly 1 numeric argument" in res.error
+

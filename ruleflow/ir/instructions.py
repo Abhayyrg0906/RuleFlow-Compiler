@@ -1,6 +1,6 @@
 """Three-Address Code (TAC) instruction definitions for RuleFlow IR."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 class Constant:
@@ -280,3 +280,36 @@ class RuleBoundaryInstruction(Instruction):
         if isinstance(other, RuleBoundaryInstruction):
             return self.name == other.name and self.is_start == other.is_start
         return False
+
+
+class FunctionCallInstruction(Instruction):
+    """Function call instruction: target = func_name(arg1, arg2, ...)."""
+
+    def __init__(self, target: str, func_name: str, args: List[Any]):
+        self.target = target
+        self.func_name = func_name
+        self.args = list(args)
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = super().to_dict()
+        d.update({
+            "target": self.target,
+            "op": f"CALL {self.func_name}",
+            "arg1": ", ".join(format_operand(a) for a in self.args),
+            "arg2": None,
+        })
+        return d
+
+    def __str__(self) -> str:
+        formatted_args = ", ".join(format_operand(a) for a in self.args)
+        return f"{self.target} = {self.func_name}({formatted_args})"
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, FunctionCallInstruction):
+            return (
+                self.target == other.target
+                and self.func_name == other.func_name
+                and self.args == other.args
+            )
+        return False
+
