@@ -1,0 +1,11 @@
+// Example: Demonstrates Syntax Error Recovery across multiple statements
+RULE SyntaxRecovery:
+    // Syntax error 1: Extra unexpected token in statement
+    a = 10 20
+
+    // Valid statement safely parsed between errors
+    b = 42
+
+    // Syntax error 2: Extra unexpected token in statement
+    c = 100 200
+END

@@ -25,13 +25,29 @@ from ruleflow.ast.nodes import (
     FunctionDeclarationNode,
 )
 from .errors import ParserError
+from ruleflow.diagnostics.codes import DiagnosticCode
+from ruleflow.diagnostics.diagnostic import Diagnostic
+from ruleflow.diagnostics.formatter import DiagnosticFormatter
+from ruleflow.diagnostics.reporter import DiagnosticReporter
+from ruleflow.diagnostics.suggestions import suggest_keyword
 
 
 class Parser:
     """Recursive descent syntax analyzer for the RuleFlow language."""
 
-    def __init__(self, tokens: Optional[List[Token]] = None):
+    def __init__(
+        self,
+        tokens: Optional[List[Token]] = None,
+        source_code: Optional[str] = None,
+        reporter: Optional[DiagnosticReporter] = None,
+        recovery: bool = False,
+    ):
         self.tokens: List[Token] = list(tokens) if tokens else []
+        self.source_code = source_code
+        self.reporter = reporter if reporter is not None else DiagnosticReporter(source_code=source_code)
+        self.recovery = recovery
+        self.diagnostics: List[Diagnostic] = []
+
         # Ensure there is always an EOF token at the end
         if not self.tokens or self.tokens[-1].type != TokenType.EOF:
             last_line = self.tokens[-1].line if self.tokens else 1
@@ -39,6 +55,41 @@ class Parser:
             self.tokens.append(Token(TokenType.EOF, "", last_line, last_col))
 
         self.cursor: int = 0
+
+    def _get_source_line(self, line: Optional[int]) -> Optional[str]:
+        """Extract source line for error reporting."""
+        if line is not None and self.source_code:
+            return DiagnosticFormatter.extract_source_line(self.source_code, line)
+        return None
+
+    def _record_error(self, err: ParserError) -> None:
+        """Record parser diagnostic."""
+        if err.diagnostic.source_line is None and self.source_code and err.line:
+            err.diagnostic.source_line = self._get_source_line(err.line)
+        self.diagnostics.append(err.diagnostic)
+        self.reporter.add(err.diagnostic)
+
+    def synchronize(self) -> None:
+        """Advance past the current error until a safe statement boundary or sync token."""
+        if not self.check(TokenType.EOF):
+            self.advance()
+
+        sync_tokens = {
+            TokenType.RULE,
+            TokenType.FUNCTION,
+            TokenType.IF,
+            TokenType.WHILE,
+            TokenType.RETURN,
+            TokenType.END,
+            TokenType.ELSE,
+        }
+
+        while not self.check(TokenType.EOF):
+            if self.current_token().type in sync_tokens:
+                return
+            if self.check(TokenType.IDENTIFIER) and self.peek().type == TokenType.ASSIGN:
+                return
+            self.advance()
 
     # ---------------------------------------------------------
     # Helper & Navigation Methods
@@ -81,11 +132,29 @@ class Parser:
             return self.advance()
 
         found_str = repr(current.value) if current.value else current.type.value
+        suggestion = None
+        if expected_type == TokenType.DO and current.type == TokenType.THEN:
+            suggestion = "Did you mean 'DO'?"
+        elif expected_type == TokenType.THEN and current.type == TokenType.DO:
+            suggestion = "Did you mean 'THEN'?"
+        elif current.type == TokenType.IDENTIFIER and isinstance(current.value, str):
+            s = suggest_keyword(current.value)
+            if s:
+                suggestion = s
+
+        code = (
+            DiagnosticCode.SYN_MISSING_TOKEN
+            if "expected" in error_message.lower()
+            else DiagnosticCode.SYN_UNEXPECTED_TOKEN
+        )
         raise ParserError(
             f"{error_message} (found: {found_str})",
             current.line,
             current.column,
             found_token=current,
+            code=code,
+            suggestion=suggestion,
+            source_line=self._get_source_line(current.line),
         )
 
     # ---------------------------------------------------------
@@ -99,8 +168,29 @@ class Parser:
         start_col = self.current_token().column
 
         while not self.check(TokenType.EOF):
-            stmt = self.parse_statement()
-            statements.append(stmt)
+            if not self.recovery:
+                stmt = self.parse_statement()
+                statements.append(stmt)
+            else:
+                try:
+                    stmt = self.parse_statement()
+                    if stmt is not None:
+                        statements.append(stmt)
+                except ParserError as err:
+                    self._record_error(err)
+                    self.synchronize()
+
+        if self.recovery and self.diagnostics:
+            first_err = ParserError(
+                self.diagnostics[0].message,
+                self.diagnostics[0].line or 1,
+                self.diagnostics[0].column or 1,
+                code=self.diagnostics[0].code,
+                suggestion=self.diagnostics[0].suggestion,
+                source_line=self.diagnostics[0].source_line,
+            )
+            first_err.diagnostics = list(self.diagnostics)
+            raise first_err
 
         return ProgramNode(statements=statements, line=start_line, column=start_col)
 
@@ -146,7 +236,16 @@ class Parser:
         body: List[ASTNode] = []
         # Parse statements inside rule until EOF, another RULE, FUNCTION, or an explicit END
         while not self.check(TokenType.EOF, TokenType.RULE, TokenType.FUNCTION, TokenType.END):
-            body.append(self.parse_statement())
+            if not self.recovery:
+                body.append(self.parse_statement())
+            else:
+                try:
+                    stmt = self.parse_statement()
+                    if stmt is not None:
+                        body.append(stmt)
+                except ParserError as err:
+                    self._record_error(err)
+                    self.synchronize()
 
         # Optional closing END for the rule declaration
         if self.check(TokenType.END):

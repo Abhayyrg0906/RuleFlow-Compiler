@@ -14,6 +14,12 @@ from ruleflow.ir import IRGenerator
 from ruleflow.optimizer import Optimizer
 from ruleflow.codegen import CodeGenerator
 from ruleflow.execution import Executor, ExecutionError
+from ruleflow.diagnostics import (
+    DiagnosticFormatter,
+    DiagnosticReporter,
+    DiagnosticSeverity,
+    DiagnosticCategory,
+)
 
 st.set_page_config(
     page_title="RuleFlow Compiler",
@@ -50,7 +56,11 @@ st.sidebar.markdown("---")
 st.sidebar.header("🏷️ External Input Variables")
 default_inputs = (
     ""
-    if ("while_loop" in selected_example_name or "user_defined_functions" in selected_example_name)
+    if (
+        "while_loop" in selected_example_name
+        or "user_defined_functions" in selected_example_name
+        or "_error" in selected_example_name
+    )
     else (
         "score: INTEGER\ntax_rate: DECIMAL\nstudent_name: STRING"
         if "builtin_functions" in selected_example_name
@@ -88,7 +98,11 @@ st.sidebar.markdown("---")
 st.sidebar.header("🎮 Runtime Input Values")
 default_values_text = (
     ""
-    if ("while_loop" in selected_example_name or "user_defined_functions" in selected_example_name)
+    if (
+        "while_loop" in selected_example_name
+        or "user_defined_functions" in selected_example_name
+        or "_error" in selected_example_name
+    )
     else (
         'score = 85\ntax_rate = 18.75\nstudent_name = "RuleFlow"'
         if "builtin_functions" in selected_example_name
@@ -175,6 +189,7 @@ if compile_btn:
     results = {
         "failed_stage": None,
         "error_message": None,
+        "diagnostics": [],
         "tokens": None,
         "ast": None,
         "symbol_tables": {},
@@ -182,6 +197,7 @@ if compile_btn:
         "ir_instructions": None,
         "optimized_ir": None,
         "optimization_log": [],
+        "optimization_warnings": [],
         "target_code": None,
         "execution_result": None,
     }
@@ -195,21 +211,26 @@ if compile_btn:
         except LexerError as err:
             results["failed_stage"] = 0
             results["error_message"] = str(err)
+            results["diagnostics"] = [err.diagnostic]
             raise
 
         # Stage 1: Syntax Analysis (Parser)
         try:
-            parser = Parser(tokens)
+            parser = Parser(tokens, source_code=source_code, recovery=True)
             ast = parser.parse()
             results["ast"] = ast
         except ParserError as err:
             results["failed_stage"] = 1
             results["error_message"] = str(err)
+            diags = getattr(err, "diagnostics", [err.diagnostic])
+            results["diagnostics"] = diags
             raise
 
         # Stage 2: Semantic Analysis & Scoping
         try:
-            analyzer = SemanticAnalyzer(ast, input_types=input_types)
+            analyzer = SemanticAnalyzer(
+                ast, input_types=input_types, source_code=source_code, recovery=True
+            )
             analyzer.analyze()
             results["symbol_tables"] = {
                 name: table.to_dict() for name, table in analyzer.symbol_tables.items()
@@ -218,6 +239,8 @@ if compile_btn:
         except SemanticError as err:
             results["failed_stage"] = 2
             results["error_message"] = str(err)
+            diags = getattr(err, "diagnostics", [err.diagnostic])
+            results["diagnostics"] = diags
             raise
 
         # Stage 3: Intermediate Code Generation
@@ -232,10 +255,12 @@ if compile_btn:
 
         # Stage 4: Code Optimization
         try:
-            optimizer = Optimizer(ir_instructions)
+            opt_reporter = DiagnosticReporter(source_code=source_code)
+            optimizer = Optimizer(ir_instructions, reporter=opt_reporter)
             optimized_ir = optimizer.optimize()
             results["optimized_ir"] = optimized_ir
             results["optimization_log"] = optimizer.get_log()
+            results["optimization_warnings"] = opt_reporter.get_warnings()
         except Exception as err:
             results["failed_stage"] = 4
             results["error_message"] = str(err)
@@ -256,9 +281,14 @@ if compile_btn:
             executor = Executor(target_code, symbol_table=analyzer.symbol_table)
             execution_result = executor.execute(runtime_inputs)
             results["execution_result"] = execution_result
+            if execution_result.status == "failed" and execution_result.diagnostic:
+                results["failed_stage"] = 6
+                results["error_message"] = execution_result.error or str(execution_result.message)
+                results["diagnostics"] = [execution_result.diagnostic]
         except ExecutionError as err:
             results["failed_stage"] = 6
             results["error_message"] = str(err)
+            results["diagnostics"] = [err.diagnostic]
             raise
         except Exception as err:
             results["failed_stage"] = 6
@@ -284,9 +314,26 @@ if pipeline_results is None:
 else:
     failed_stage = pipeline_results.get("failed_stage")
     error_message = pipeline_results.get("error_message")
+    diagnostics = pipeline_results.get("diagnostics", [])
 
     if failed_stage is not None:
         st.error(f"❌ Pipeline halted at {STAGE_NAMES[failed_stage]}: {error_message}")
+        if diagnostics:
+            st.markdown("### 🔍 Advanced Diagnostics Report")
+            for idx, diag in enumerate(diagnostics, start=1):
+                sev_color = "red" if diag.severity == DiagnosticSeverity.ERROR else "orange"
+                st.markdown(
+                    f"**Issue #{idx}:** :{sev_color}[{diag.severity.value}] `[{diag.code}]` "
+                    f"**{diag.category.value}** - Line {diag.line or '?'}, Col {diag.column or '?'}"
+                )
+                st.markdown(f"> **{diag.message}**")
+                if diag.suggestion:
+                    st.info(f"💡 **Suggestion:** {diag.suggestion}")
+                if diag.related_info:
+                    st.caption(f"ℹ️ {diag.related_info}")
+                formatted = DiagnosticFormatter.format(diag, source_code=source_code)
+                with st.expander(f"View Caret Highlighting & Context (#{idx})", expanded=True):
+                    st.code(formatted, language="text")
 
     def render_skipped(tab, stage_idx: int) -> None:
         with tab:
@@ -299,6 +346,8 @@ else:
         with tabs[0]:
             st.markdown("#### Lexical Analysis")
             st.error(f"Lexical Error Encountered:\n\n{error_message}")
+            if diagnostics:
+                st.code(DiagnosticFormatter.format_all(diagnostics, source_code), language="text")
     elif pipeline_results.get("tokens") is not None:
         tokens = pipeline_results["tokens"]
         with tabs[0]:
@@ -316,6 +365,8 @@ else:
         with tabs[1]:
             st.markdown("#### Syntax Analysis (Abstract Syntax Tree)")
             st.error(f"Syntax Error Encountered:\n\n{error_message}")
+            if diagnostics:
+                st.code(DiagnosticFormatter.format_all(diagnostics, source_code), language="text")
     elif pipeline_results.get("ast") is not None:
         ast = pipeline_results["ast"]
         with tabs[1]:
@@ -334,6 +385,8 @@ else:
         with tabs[2]:
             st.markdown("#### Semantic Analysis & Type Checking")
             st.error(f"Semantic Error Encountered:\n\n{error_message}")
+            if diagnostics:
+                st.code(DiagnosticFormatter.format_all(diagnostics, source_code), language="text")
     else:
         symbol_tables = pipeline_results.get("symbol_tables", {})
         with tabs[2]:
@@ -446,6 +499,8 @@ else:
         with tabs[6]:
             st.markdown("#### Execution / Runtime Output")
             st.error(f"Runtime Execution Error:\n\n{error_message}")
+            if diagnostics:
+                st.code(DiagnosticFormatter.format_all(diagnostics, source_code), language="text")
     elif pipeline_results.get("execution_result") is not None:
         execution_result = pipeline_results["execution_result"]
         with tabs[6]:

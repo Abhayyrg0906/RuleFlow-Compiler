@@ -1,0 +1,6 @@
+// Example: Demonstrates SEM005 Misspelled Built-in Function with intelligent suggestion
+RULE TextProcessing:
+    username = "RuleFlowUser"
+    // Note the typo: LENGHT instead of LENGTH
+    name_length = LENGHT(username)
+END

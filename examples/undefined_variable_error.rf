@@ -1,0 +1,9 @@
+// Example: Demonstrates SEM001 Undefined Variable with intelligent typo suggestion
+RULE StudentEligibility:
+    attendance = 85
+    gpa = 3.8
+    // Note the typo: 'attendence' instead of 'attendance'
+    IF gpa >= 3.5 AND attendence >= 75 THEN
+        status = "Eligible"
+    END
+END

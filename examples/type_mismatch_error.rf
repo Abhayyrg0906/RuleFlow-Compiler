@@ -1,0 +1,6 @@
+// Example: Demonstrates SEM002 Type Mismatch on incompatible reassignment
+RULE EmployeeBonus:
+    bonus = 5000
+    // Attempting to assign a STRING to an INTEGER variable
+    bonus = "Five Thousand"
+END

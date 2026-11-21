@@ -32,6 +32,7 @@ class ExecutionResult:
         trace: Optional[List[str]] = None,
         error: Optional[str] = None,
         message: Optional[str] = None,
+        diagnostic: Optional[Any] = None,
     ):
         self.status = status
         self.outputs = outputs
@@ -40,6 +41,7 @@ class ExecutionResult:
         self.trace = trace or []
         self.error = error
         self.message = message
+        self.diagnostic = diagnostic
 
     @property
     def steps(self) -> int:
@@ -62,6 +64,7 @@ class ExecutionResult:
             "trace": self.trace,
             "error": self.error,
             "message": self.message,
+            "diagnostic": self.diagnostic.to_dict() if self.diagnostic else None,
         }
 
     def __getitem__(self, key: str) -> Any:
@@ -318,6 +321,7 @@ class TACInterpreter:
                 trace=trace,
                 error=err.message,
                 message=str(err),
+                diagnostic=err.diagnostic,
             )
 
     def _execute_binary_op(

@@ -27,6 +27,16 @@ from ruleflow.ast.nodes import (
 from .types import DataType
 from .symbol_table import SymbolTable, Symbol, FunctionSymbol
 from .errors import SemanticError
+from ruleflow.diagnostics.codes import DiagnosticCode
+from ruleflow.diagnostics.diagnostic import Diagnostic
+from ruleflow.diagnostics.formatter import DiagnosticFormatter
+from ruleflow.diagnostics.reporter import DiagnosticReporter
+from ruleflow.diagnostics.suggestions import (
+    BUILTIN_FUNCTIONS,
+    find_best_match,
+    suggest_builtin_function,
+    suggest_variable,
+)
 
 
 class SemanticAnalyzer:
@@ -36,8 +46,17 @@ class SemanticAnalyzer:
         self,
         ast: Optional[ProgramNode] = None,
         input_types: Optional[Dict[str, Union[DataType, str]]] = None,
+        source_code: Optional[str] = None,
+        reporter: Optional[DiagnosticReporter] = None,
+        recovery: bool = True,
     ):
         self.ast = ast
+        self.source_code = source_code
+        self.reporter = reporter if reporter is not None else DiagnosticReporter(source_code=source_code)
+        self.recovery = recovery
+        self.diagnostics: List[Diagnostic] = []
+        self.errors: List[SemanticError] = []
+
         self.input_types: Dict[str, DataType] = {}
         if input_types:
             for k, v in input_types.items():
@@ -51,6 +70,22 @@ class SemanticAnalyzer:
         # Map of function name -> FunctionSymbol
         self.function_symbols: Dict[str, FunctionSymbol] = {}
         self.current_function: Optional[FunctionSymbol] = None
+
+    def _get_source_line(self, line: Optional[int]) -> Optional[str]:
+        """Extract source line for error reporting."""
+        if line is not None and self.source_code:
+            return DiagnosticFormatter.extract_source_line(self.source_code, line)
+        return None
+
+    def _record_error(self, err: SemanticError) -> None:
+        """Record a semantic error and either raise or store for recovery."""
+        if err.diagnostic.source_line is None and self.source_code and err.line:
+            err.diagnostic.source_line = self._get_source_line(err.line)
+        self.diagnostics.append(err.diagnostic)
+        self.reporter.add(err.diagnostic)
+        self.errors.append(err)
+        if not self.recovery:
+            raise err
 
     def analyze(self, ast: Optional[ProgramNode] = None) -> bool:
         """Analyze the AST and populate symbol tables.
@@ -69,30 +104,43 @@ class SemanticAnalyzer:
         self.symbol_table.clear()
         self.function_symbols.clear()
         self.current_function = None
+        self.diagnostics.clear()
+        self.errors.clear()
 
         has_rules = any(isinstance(stmt, RuleDeclarationNode) for stmt in tree_to_analyze.statements)
 
         if has_rules:
             for stmt in tree_to_analyze.statements:
-                if isinstance(stmt, FunctionDeclarationNode):
-                    self.analyze_function(stmt)
-                elif isinstance(stmt, RuleDeclarationNode):
-                    self.analyze_rule(stmt)
-                else:
-                    # Non-rule statement alongside rules
-                    if self.current_symbol_table is None:
-                        self.current_symbol_table = self.create_initial_symbol_table()
-                    self.analyze_statement(stmt)
+                try:
+                    if isinstance(stmt, FunctionDeclarationNode):
+                        self.analyze_function(stmt)
+                    elif isinstance(stmt, RuleDeclarationNode):
+                        self.analyze_rule(stmt)
+                    else:
+                        # Non-rule statement alongside rules
+                        if self.current_symbol_table is None:
+                            self.current_symbol_table = self.create_initial_symbol_table()
+                        self.analyze_statement(stmt)
+                except SemanticError as err:
+                    self._record_error(err)
         else:
             # Standalone statements outside any rule
             self.current_symbol_table = self.create_initial_symbol_table()
             self.symbol_tables["__global__"] = self.current_symbol_table
             for stmt in tree_to_analyze.statements:
-                if isinstance(stmt, FunctionDeclarationNode):
-                    self.analyze_function(stmt)
-                else:
-                    self.analyze_statement(stmt)
+                try:
+                    if isinstance(stmt, FunctionDeclarationNode):
+                        self.analyze_function(stmt)
+                    else:
+                        self.analyze_statement(stmt)
+                except SemanticError as err:
+                    self._record_error(err)
             self.symbol_table = self.current_symbol_table.to_dict()
+
+        if self.errors:
+            first_err = self.errors[0]
+            first_err.diagnostics = list(self.diagnostics)
+            raise first_err
 
         return True
 
@@ -110,7 +158,10 @@ class SemanticAnalyzer:
         self.current_symbol_table = rule_table
 
         for stmt in rule.body:
-            self.analyze_statement(stmt)
+            try:
+                self.analyze_statement(stmt)
+            except SemanticError as err:
+                self._record_error(err)
 
         # Expose active symbol table for UI / inspection
         self.symbol_table = rule_table.to_dict()
@@ -138,18 +189,26 @@ class SemanticAnalyzer:
         if self.current_symbol_table is None:
             self.current_symbol_table = self.create_initial_symbol_table()
 
-        value_type = self.analyze_expression(node.value)
+        try:
+            value_type = self.analyze_expression(node.value)
+        except SemanticError as err:
+            self._record_error(err)
+            value_type = DataType.UNKNOWN
 
         existing_symbol = self.current_symbol_table.lookup(node.target)
         if existing_symbol is not None:
             # Reassignment: verify type compatibility
-            if not existing_symbol.data_type.is_compatible_with(value_type):
-                raise SemanticError(
+            if value_type != DataType.UNKNOWN and not existing_symbol.data_type.is_compatible_with(value_type):
+                err = SemanticError(
                     f"Cannot assign {value_type.value} to {existing_symbol.data_type.value} variable '{node.target}'",
                     line=node.line,
                     column=node.column,
                     identifier=node.target,
+                    code=DiagnosticCode.SEM_TYPE_MISMATCH,
+                    source_line=self._get_source_line(node.line),
+                    related_info=f"Variable '{node.target}' has declared type {existing_symbol.data_type.value}, but assigned value has type {value_type.value}",
                 )
+                self._record_error(err)
         else:
             # First assignment: introduce variable with inferred type
             self.current_symbol_table.define(
@@ -443,20 +502,31 @@ class SemanticAnalyzer:
 
         if isinstance(node, IdentifierNode):
             if self.current_symbol_table is None:
-                raise SemanticError(
+                err = SemanticError(
                     f"Undefined variable '{node.name}'",
                     line=node.line,
                     column=node.column,
                     identifier=node.name,
+                    code=DiagnosticCode.SEM_UNDEFINED_VARIABLE,
+                    source_line=self._get_source_line(node.line),
                 )
+                self._record_error(err)
+                return DataType.UNKNOWN
             sym = self.current_symbol_table.lookup(node.name)
             if sym is None:
-                raise SemanticError(
+                candidates = list(self.current_symbol_table.symbols.keys())
+                suggestion = suggest_variable(node.name, candidates)
+                err = SemanticError(
                     f"Undefined variable '{node.name}'",
                     line=node.line,
                     column=node.column,
                     identifier=node.name,
+                    code=DiagnosticCode.SEM_UNDEFINED_VARIABLE,
+                    suggestion=suggestion,
+                    source_line=self._get_source_line(node.line),
                 )
+                self._record_error(err)
+                return DataType.UNKNOWN
             return sym.data_type
 
         if isinstance(node, FunctionCallNode):
@@ -490,11 +560,23 @@ class SemanticAnalyzer:
             # 3. Built-in functions
             func_name = node.name.upper()
             if func_name not in ("ABS", "MIN", "MAX", "ROUND", "LENGTH"):
-                raise SemanticError(
+                candidates = list(self.function_symbols.keys()) + list(BUILTIN_FUNCTIONS)
+                suggestion = suggest_builtin_function(node.name)
+                if not suggestion:
+                    best = find_best_match(node.name, candidates)
+                    if best:
+                        suggestion = f"Did you mean '{best}'?"
+                err = SemanticError(
                     f"Unknown function '{node.name}'",
                     line=node.line,
                     column=node.column,
+                    identifier=node.name,
+                    code=DiagnosticCode.SEM_INVALID_FUNCTION_CALL,
+                    suggestion=suggestion,
+                    source_line=self._get_source_line(node.line),
                 )
+                self._record_error(err)
+                return DataType.UNKNOWN
 
             # 1. ABS(value): 1 numeric argument -> returns numeric type of argument
             if func_name == "ABS":
@@ -589,6 +671,9 @@ class SemanticAnalyzer:
 
         if isinstance(node, UnaryOpNode):
             operand_type = self.analyze_expression(node.operand)
+            if operand_type == DataType.UNKNOWN:
+                return DataType.UNKNOWN
+
             if node.op in ("+", "-"):
                 if not operand_type.is_numeric():
                     raise SemanticError(
@@ -620,6 +705,10 @@ class SemanticAnalyzer:
             left_type = self.analyze_expression(node.left)
             right_type = self.analyze_expression(node.right)
             op = node.op
+
+            # If either side had an error, propagate UNKNOWN to prevent cascading errors
+            if left_type == DataType.UNKNOWN or right_type == DataType.UNKNOWN:
+                return DataType.UNKNOWN
 
             # 1. Arithmetic Operators (+, -, *, /, %)
             if op in ("+", "-", "*", "/", "%"):

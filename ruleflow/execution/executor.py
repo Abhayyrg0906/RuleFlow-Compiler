@@ -59,6 +59,7 @@ class Executor:
                 step_count=0,
                 error=err.message,
                 message=str(err),
+                diagnostic=err.diagnostic,
             )
 
     def _validate_and_load_inputs(self, provided_inputs: Dict[str, Any]) -> None:

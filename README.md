@@ -34,17 +34,31 @@ RuleFlow-Compiler/
 │   ├── ast/                   # Abstract Syntax Tree nodes
 │   │   ├── __init__.py
 │   │   └── nodes.py
+│   ├── diagnostics/           # Advanced diagnostic & error reporting system
+│   │   ├── __init__.py
+│   │   ├── codes.py           # Standardized diagnostic error codes
+│   │   ├── diagnostic.py      # Diagnostic models & source range tracking
+│   │   ├── formatter.py       # Rich snippet formatting with caret indicators
+│   │   ├── reporter.py        # Centralized collector & multi-error accumulator
+│   │   └── suggestions.py     # Typo detection & symbol suggestion engine
 │   ├── lexer/                 # Lexical analysis (tokenization)
 │   │   ├── __init__.py
-│   │   └── lexer.py
+│   │   ├── errors.py
+│   │   ├── lexer.py
+│   │   └── tokens.py
 │   ├── parser/                # Syntax analysis (parsing)
 │   │   ├── __init__.py
+│   │   ├── errors.py
 │   │   └── parser.py
 │   ├── semantic/              # Semantic validation & symbol tables
 │   │   ├── __init__.py
-│   │   └── analyzer.py
+│   │   ├── analyzer.py
+│   │   ├── errors.py
+│   │   ├── symbol_table.py
+│   │   └── types.py
 │   ├── ir/                    # Intermediate code generation (IR)
 │   │   ├── __init__.py
+│   │   ├── instructions.py
 │   │   └── ir_generator.py
 │   ├── optimizer/             # Code optimization passes
 │   │   ├── __init__.py
@@ -66,7 +80,12 @@ RuleFlow-Compiler/
 │   ├── grade_evaluation.rf
 │   ├── builtin_functions.rf
 │   ├── while_loop.rf
-│   └── user_defined_functions.rf
+│   ├── user_defined_functions.rf
+│   ├── undefined_variable_error.rf
+│   ├── type_mismatch_error.rf
+│   ├── syntax_error_recovery.rf
+│   ├── misspelled_function_error.rf
+│   └── multiple_semantic_errors.rf
 │
 └── tests/                     # Unit and integration tests
     ├── __init__.py
@@ -77,7 +96,8 @@ RuleFlow-Compiler/
     ├── test_ir.py
     ├── test_optimizer.py
     ├── test_audit_module4.py
-    └── test_execution.py
+    ├── test_execution.py
+    └── test_diagnostics.py
 ```
 
 ---
@@ -261,6 +281,7 @@ Verify all compiler modules using `pytest`:
 - [x] **Phase 7.2: Built-in Function Support (ABS, MIN, MAX, ROUND, LENGTH)**
 - [x] **Phase 7.3: Iterative Control Flow with WHILE Loops**
 - [x] **Phase 7.4: User-Defined Functions (FUNCTION, RETURNS, RETURN, Scope Isolation, Call Frames)**
+- [x] **Phase 7.5: Advanced Error Diagnostics (Codes, Source Carets, Typo Suggestions, Multi-Error Recovery)**
 
 ---
 
@@ -377,5 +398,77 @@ END
    - Closes with the loop exit label (`LABEL L_while_end_N`).
 4. **Loop Safety & Step Limit**: The runtime interpreter enforces a configurable step threshold (`max_steps`, defaulting to 10,000 steps). Infinite loops are safely terminated with an `ExecutionError`, preventing process freezes.
 5. **Optimizer Safety**: Conservative control-flow boundaries ensure that loop headers clear transient constants, preventing unsafe propagation across loop iterations.
+
+---
+
+## 🔍 Advanced Error Diagnostics (Phase 7.5)
+
+RuleFlow includes an advanced, unified error diagnostic system modeled after modern production compilers (such as Rust and Clang).
+
+### Core Architecture (`ruleflow/diagnostics/`)
+
+- **`Diagnostic`**: Core data structure capturing:
+  - `code`: Stable, documented identifier (e.g. `SEM001`, `SYN002`).
+  - `category`: Compiler phase (`LEXICAL`, `SYNTAX`, `SEMANTIC`, `OPTIMIZATION`, `CODE_GENERATION`, `RUNTIME`).
+  - `severity`: Severity level (`ERROR`, `WARNING`, `INFO`).
+  - `message`: Clear, human-readable error description.
+  - `location` / `range`: Exact 1-based line, column, and span boundaries (`SourceLocation`, `SourceRange`).
+  - `source_code`: The input source string for context and code snippet rendering.
+  - `suggestion`: Actionable remediation tip or "Did you mean ...?" correction.
+- **`DiagnosticReporter`**: Centralized accumulator managing multi-error recovery collections, filtering by severity or phase, and checking whether compilation should halt (`has_errors()`).
+- **`DiagnosticFormatter`**: Formats diagnostics into beautiful visual terminal snippets with line gutters, source context, and underline carets (`^^^^`) highlighting the exact span of the offending token.
+
+### Standardized Diagnostic Codes
+
+| Code | Category | Severity | Description |
+|---|---|---|---|
+| `LEX001` | Lexical | Error | Unexpected or invalid character |
+| `LEX002` | Lexical | Error | Unterminated string literal |
+| `LEX003` | Lexical | Warning | Non-standard token or lexical anomaly |
+| `SYN001` | Syntax | Error | Unexpected token |
+| `SYN002` | Syntax | Error | Missing expected token (e.g. missing `THEN`, `DO`, `END`) |
+| `SYN003` | Syntax | Error | Premature end of file (EOF) |
+| `SYN004` | Syntax | Error | Invalid statement or declaration structure |
+| `SEM001` | Semantic | Error | Undefined variable reference |
+| `SEM002` | Semantic | Error | Type mismatch in expression or assignment |
+| `SEM003` | Semantic | Error | Variable used before definite assignment |
+| `SEM004` | Semantic | Error | Unknown function call |
+| `SEM005` | Semantic | Error | Function argument count mismatch |
+| `SEM006` | Semantic | Error | Function argument type mismatch |
+| `SEM007` | Semantic | Error | Function return type mismatch |
+| `SEM008` | Semantic | Error | Duplicate definition or illegal recursion |
+| `OPT001` | Optimization | Warning | Dead code eliminated |
+| `OPT002` | Optimization | Info | Constant folding or propagation applied |
+| `GEN001` | Codegen | Error | Code generation failed |
+| `RUN001` | Runtime | Error | Division or modulo by zero |
+| `RUN002` | Runtime | Error | Runtime type mismatch |
+| `RUN003` | Runtime | Error | Execution step limit exceeded (infinite loop) |
+| `RUN004` | Runtime | Error | Call stack overflow or unhandled runtime failure |
+
+### Rich Source Code Highlighting
+
+The diagnostic formatter produces structured, readable terminal and UI snippets:
+
+```text
+[ERROR] SEM001: Undefined variable 'attendence'
+  --> Line 2, Column 8
+  |
+2 |     IF attendence >= 75 THEN
+  |        ^^^^^^^^^^
+  = Suggestion: Did you mean variable 'attendance'?
+```
+
+### Typo Suggestions
+
+The suggestion engine (`ruleflow/diagnostics/suggestions.py`) uses normalized string matching to offer intelligent, contextual suggestions:
+- **Undefined Variables**: Compares the misspelled identifier against in-scope variables and parameters (`attendence` $\rightarrow$ `attendance`).
+- **Function Names**: Compares unknown functions against all registered built-in and user-defined functions (`LENGHT` $\rightarrow$ `LENGTH`, `MAXIMUM` $\rightarrow$ `MAX`).
+- **Keywords**: Compares misspelled or unexpected tokens against RuleFlow grammar keywords (`THEN` when encountering `DO` in an `IF` statement).
+
+### Parser Error Recovery & Cascade Error Suppression
+
+1. **Parser Synchronization**: When a syntax error occurs within a statement block, the parser records the diagnostic and synchronizes to statement boundary tokens (`RULE`, `FUNCTION`, `IF`, `WHILE`, `RETURN`, `END`), allowing it to discover subsequent syntax errors in the same file rather than aborting at the first failure.
+2. **Semantic Cascade Suppression**: When an expression fails type checking or variable lookup, it resolves to `DataType.UNKNOWN`. This sentinel suppresses follow-on cascade errors, preventing false secondary warnings on enclosing operations or subsequent assignments.
+
 
 

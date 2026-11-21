@@ -1,0 +1,17 @@
+// Example: Demonstrates multiple independent semantic errors collected in one pass
+RULE MultipleSemanticErrors:
+    total_score = 100
+
+    // Error 1: Undefined variable with suggestion
+    updated = totl_score + 10
+
+    // Error 2: Type mismatch (STRING in IF condition)
+    flag = "True"
+    IF flag THEN
+        status = "Active"
+    END
+
+    // Error 3: Incompatible reassignment
+    count = 10
+    count = "Ten"
+END

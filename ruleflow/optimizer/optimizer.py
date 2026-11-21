@@ -25,13 +25,21 @@ from ruleflow.ir.instructions import (
     FunctionBoundaryInstruction,
     ReturnInstruction,
 )
+from ruleflow.diagnostics.codes import DiagnosticCode
+from ruleflow.diagnostics.diagnostic import DiagnosticCategory
+from ruleflow.diagnostics.reporter import DiagnosticReporter
 
 
 class Optimizer:
     """Performs iterative optimization on Three-Address Code (TAC) instructions."""
 
-    def __init__(self, ir_instructions: Optional[List[Instruction]] = None):
+    def __init__(
+        self,
+        ir_instructions: Optional[List[Instruction]] = None,
+        reporter: Optional[DiagnosticReporter] = None,
+    ):
         self.ir_instructions: List[Instruction] = list(ir_instructions) if ir_instructions else []
+        self.reporter = reporter
         self.transformations: List[str] = []
 
     def get_log(self) -> List[str]:
@@ -445,6 +453,12 @@ class Optimizer:
                     self.transformations.append(
                         f"Removed unused temporary computation: {inst}"
                     )
+                    if self.reporter:
+                        self.reporter.warning(
+                            code=DiagnosticCode.OPT_DEAD_CODE,
+                            message=f"Dead code eliminated: unused temporary '{target}' in '{inst}'",
+                            category=DiagnosticCategory.OPTIMIZATION,
+                        )
                     changed = True
                     continue
 
