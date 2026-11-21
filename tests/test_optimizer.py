@@ -319,3 +319,95 @@ def test_while_loop_labels_and_jumps_preserved():
     assert raw_labels == opt_labels
 
 
+# -------------------------------------------------------------
+# User-Defined Functions Optimization Tests (Phase 7.4)
+# -------------------------------------------------------------
+
+def test_optimizer_preserves_function_boundaries_and_returns():
+    """Verify that FunctionBoundaryInstruction and ReturnInstruction are preserved."""
+    from ruleflow.ir.instructions import FunctionBoundaryInstruction, ReturnInstruction
+
+    code = """
+    FUNCTION DoubleVal(x: INTEGER) RETURNS INTEGER:
+        res = x * 2
+        RETURN res
+    END
+
+    RULE CallRule:
+        a = DoubleVal(5)
+    END
+    """
+    _, opt_ir, _ = get_optimized_ir(code)
+
+    boundaries = [inst for inst in opt_ir if isinstance(inst, FunctionBoundaryInstruction)]
+    assert len(boundaries) == 2
+    assert boundaries[0].is_start is True
+    assert boundaries[0].name == "DoubleVal"
+    assert boundaries[1].is_start is False
+
+    returns = [inst for inst in opt_ir if isinstance(inst, ReturnInstruction)]
+    assert len(returns) == 1
+
+
+def test_optimizer_does_not_eliminate_function_calls():
+    """Verify that user-defined function calls are preserved during dead code elimination."""
+    from ruleflow.ir.instructions import FunctionCallInstruction
+
+    code = """
+    FUNCTION SideEffect(x: INTEGER) RETURNS INTEGER:
+        RETURN x + 1
+    END
+
+    RULE CallRule:
+        unused = SideEffect(10)
+        kept = 42
+    END
+    """
+    _, opt_ir, _ = get_optimized_ir(code)
+    calls = [inst for inst in opt_ir if isinstance(inst, FunctionCallInstruction)]
+    assert len(calls) == 1
+    assert calls[0].func_name == "SideEffect"
+
+
+def test_optimizer_constants_do_not_propagate_across_function_boundaries():
+    """Verify that known constants do not propagate across function boundaries."""
+    code = """
+    FUNCTION Helper(a: INTEGER) RETURNS INTEGER:
+        local_c = 10
+        RETURN a + local_c
+    END
+
+    RULE Caller:
+        local_c = 20
+        res = Helper(5)
+        out = local_c
+    END
+    """
+    _, opt_ir, _ = get_optimized_ir(code)
+    # The output variable 'out' should equal 20, unaffected by Helper's internal local_c
+    copy_insts = [inst for inst in opt_ir if hasattr(inst, "target") and inst.target == "out"]
+    assert len(copy_insts) == 1
+    assert getattr(copy_insts[0].source, "value", copy_insts[0].source) == 20
+
+
+def test_optimizer_constant_folding_inside_function():
+    """Verify that pure constant sub-expressions fold inside function bodies."""
+    from ruleflow.ir.instructions import ReturnInstruction
+
+    code = """
+    FUNCTION Precomputed() RETURNS INTEGER:
+        val = 10 + 20 * 2
+        RETURN val
+    END
+
+    RULE Run:
+        x = Precomputed()
+    END
+    """
+    _, opt_ir, _ = get_optimized_ir(code)
+    # 10 + 20 * 2 = 50 should fold
+    ret = [inst for inst in opt_ir if isinstance(inst, ReturnInstruction)][0]
+    assert getattr(ret.value, "value", ret.value) == 50
+
+
+

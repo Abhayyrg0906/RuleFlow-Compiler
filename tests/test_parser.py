@@ -802,3 +802,195 @@ def test_while_statement_node_methods():
     assert repr(while_node).startswith("WhileStatementNode")
 
 
+# -------------------------------------------------------------
+# 7. User-Defined Functions Tests (Phase 7.4)
+# -------------------------------------------------------------
+
+def test_parse_function_single_parameter():
+    """Verify parsing a function with a single parameter and return statement."""
+    from ruleflow.ast.nodes import FunctionDeclarationNode, ReturnStatementNode
+
+    code = """
+    FUNCTION DoubleVal(x: INTEGER) RETURNS INTEGER:
+        RETURN x * 2
+    END
+    """
+    ast = parse_code(code)
+    assert len(ast.statements) == 1
+    func = ast.statements[0]
+    assert isinstance(func, FunctionDeclarationNode)
+    assert func.name == "DoubleVal"
+    assert len(func.parameters) == 1
+    assert func.parameters[0].name == "x"
+    assert func.parameters[0].data_type == "INTEGER"
+    assert func.return_type == "INTEGER"
+    assert len(func.body) == 1
+    assert isinstance(func.body[0], ReturnStatementNode)
+
+
+def test_parse_function_multiple_parameters():
+    """Verify parsing a function with multiple parameters."""
+    from ruleflow.ast.nodes import FunctionDeclarationNode
+
+    code = """
+    FUNCTION CalculateBonus(salary: DECIMAL, percentage: DECIMAL) RETURNS DECIMAL:
+        bonus = salary * percentage / 100
+        RETURN bonus
+    END
+    """
+    ast = parse_code(code)
+    func = ast.statements[0]
+    assert isinstance(func, FunctionDeclarationNode)
+    assert func.name == "CalculateBonus"
+    assert len(func.parameters) == 2
+    assert func.parameters[0].name == "salary"
+    assert func.parameters[0].data_type == "DECIMAL"
+    assert func.parameters[1].name == "percentage"
+    assert func.parameters[1].data_type == "DECIMAL"
+    assert func.return_type == "DECIMAL"
+    assert len(func.body) == 2
+
+
+def test_parse_function_zero_parameters():
+    """Verify parsing a function with zero parameters."""
+    from ruleflow.ast.nodes import FunctionDeclarationNode
+
+    code = """
+    FUNCTION GetDefaultRate() RETURNS DECIMAL:
+        RETURN 0.05
+    END
+    """
+    ast = parse_code(code)
+    func = ast.statements[0]
+    assert isinstance(func, FunctionDeclarationNode)
+    assert func.name == "GetDefaultRate"
+    assert len(func.parameters) == 0
+    assert func.return_type == "DECIMAL"
+
+
+def test_parse_function_call_in_rule():
+    """Verify parsing a function call expression within a rule."""
+    from ruleflow.ast.nodes import FunctionDeclarationNode, RuleDeclarationNode, FunctionCallNode
+
+    code = """
+    FUNCTION Square(n: INTEGER) RETURNS INTEGER:
+        RETURN n * n
+    END
+
+    RULE MathRule:
+        res = Square(5) + 1
+    END
+    """
+    ast = parse_code(code)
+    assert len(ast.statements) == 2
+    assert isinstance(ast.statements[0], FunctionDeclarationNode)
+    rule = ast.statements[1]
+    assert isinstance(rule, RuleDeclarationNode)
+    assign = rule.body[0]
+    assert isinstance(assign.value, BinaryOpNode)
+    assert isinstance(assign.value.left, FunctionCallNode)
+    assert assign.value.left.name == "Square"
+    assert len(assign.value.left.args) == 1
+
+
+def test_parse_nested_function_calls():
+    """Verify parsing nested function calls."""
+    from ruleflow.ast.nodes import FunctionCallNode
+
+    code = """
+    RULE CallRule:
+        x = Foo(Bar(1, 2), 3)
+    END
+    """
+    ast = parse_code(code)
+    rule = ast.statements[0]
+    call = rule.body[0].value
+    assert isinstance(call, FunctionCallNode)
+    assert call.name == "Foo"
+    assert len(call.args) == 2
+    assert isinstance(call.args[0], FunctionCallNode)
+    assert call.args[0].name == "Bar"
+
+
+def test_parse_function_missing_returns_error():
+    """Verify syntax error when RETURNS is missing."""
+    code = """
+    FUNCTION BadFunc(x: INTEGER):
+        RETURN x
+    END
+    """
+    with pytest.raises(ParserError) as exc_info:
+        parse_code(code)
+    assert "Expected 'RETURNS' keyword" in exc_info.value.message
+
+
+def test_parse_function_missing_colon_error():
+    """Verify syntax error when ':' is missing after return type."""
+    code = """
+    FUNCTION BadFunc(x: INTEGER) RETURNS INTEGER
+        RETURN x
+    END
+    """
+    with pytest.raises(ParserError) as exc_info:
+        parse_code(code)
+    assert "Expected ':'" in exc_info.value.message
+
+
+def test_parse_function_missing_param_type_error():
+    """Verify syntax error when parameter type is missing."""
+    code = """
+    FUNCTION BadFunc(x) RETURNS INTEGER:
+        RETURN x
+    END
+    """
+    with pytest.raises(ParserError) as exc_info:
+        parse_code(code)
+    assert "Expected ':' after parameter" in exc_info.value.message
+
+
+def test_parse_function_missing_end_error():
+    """Verify syntax error when END is missing."""
+    code = """
+    FUNCTION BadFunc(x: INTEGER) RETURNS INTEGER:
+        RETURN x
+    """
+    with pytest.raises(ParserError) as exc_info:
+        parse_code(code)
+    assert "Expected 'END' to close FUNCTION declaration" in exc_info.value.message
+
+
+def test_function_ast_nodes_methods():
+    """Verify ParameterNode, ReturnStatementNode, and FunctionDeclarationNode methods."""
+    from ruleflow.ast.nodes import ParameterNode, ReturnStatementNode, FunctionDeclarationNode, LiteralNode
+
+    param = ParameterNode("rate", "DECIMAL", line=2, column=5)
+    p_dict = param.to_dict()
+    assert p_dict["node_type"] == "ParameterNode"
+    assert p_dict["name"] == "rate"
+    assert p_dict["data_type"] == "DECIMAL"
+    assert "rate: DECIMAL" in param.pretty()
+    assert repr(param).startswith("ParameterNode")
+
+    ret = ReturnStatementNode(LiteralNode(10, "INTEGER", 3, 12), line=3, column=5)
+    r_dict = ret.to_dict()
+    assert r_dict["node_type"] == "ReturnStatementNode"
+    assert "ReturnStatementNode" in ret.pretty()
+    assert repr(ret).startswith("ReturnStatementNode")
+
+    func = FunctionDeclarationNode(
+        name="Calc",
+        parameters=[param],
+        return_type="INTEGER",
+        body=[ret],
+        line=1,
+        column=1,
+    )
+    f_dict = func.to_dict()
+    assert f_dict["node_type"] == "FunctionDeclarationNode"
+    assert f_dict["name"] == "Calc"
+    assert len(f_dict["parameters"]) == 1
+    assert "FunctionDeclarationNode: 'Calc'" in func.pretty()
+    assert repr(func).startswith("FunctionDeclarationNode")
+
+
+

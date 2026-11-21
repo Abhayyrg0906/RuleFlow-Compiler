@@ -313,3 +313,71 @@ class FunctionCallInstruction(Instruction):
             )
         return False
 
+
+class FunctionBoundaryInstruction(Instruction):
+    """Demarks the beginning or ending of a named user-defined function."""
+
+    def __init__(self, name: str, params: Optional[List[str]] = None, is_start: bool = True):
+        self.name = name
+        self.params = list(params) if params is not None else []
+        self.is_start = is_start
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = super().to_dict()
+        prefix = "FUNC_START" if self.is_start else "FUNC_END"
+        d.update({
+            "target": None,
+            "op": prefix,
+            "arg1": f"{self.name}({', '.join(self.params)})" if self.is_start else self.name,
+            "arg2": None,
+            "name": self.name,
+            "params": list(self.params),
+            "is_start": self.is_start,
+        })
+        return d
+
+    def __str__(self) -> str:
+        if self.is_start:
+            param_str = f"({', '.join(self.params)})" if self.params else "()"
+            return f"FUNC_START {self.name}{param_str}"
+        return f"FUNC_END {self.name}"
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, FunctionBoundaryInstruction):
+            return (
+                self.name == other.name
+                and self.params == other.params
+                and self.is_start == other.is_start
+            )
+        return False
+
+
+class ReturnInstruction(Instruction):
+    """Return instruction from a function: RETURN value."""
+
+    def __init__(self, value: Any):
+        self.value = value
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = super().to_dict()
+        d.update({
+            "target": None,
+            "op": "RETURN",
+            "arg1": format_operand(self.value),
+            "arg2": None,
+            "value": format_operand(self.value),
+        })
+        return d
+
+    def __str__(self) -> str:
+        return f"RETURN {format_operand(self.value)}"
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, ReturnInstruction):
+            return self.value == other.value
+        return False
+
+
+CallInstruction = FunctionCallInstruction
+
+

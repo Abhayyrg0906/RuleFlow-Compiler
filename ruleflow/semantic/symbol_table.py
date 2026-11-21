@@ -1,6 +1,6 @@
 """Symbol and SymbolTable implementation for RuleFlow semantic analysis."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from .types import DataType
 
 
@@ -43,6 +43,51 @@ class Symbol:
                 and self.is_input == other.is_input
             )
         return False
+
+
+class FunctionSymbol:
+    """Represents a function declaration entry in the function symbol table."""
+
+    def __init__(
+        self,
+        name: str,
+        parameters: List[Tuple[str, DataType]],
+        return_type: DataType,
+        line: Optional[int] = None,
+        column: Optional[int] = None,
+    ):
+        self.name = name
+        self.parameters = list(parameters)
+        self.return_type = return_type
+        self.line = line
+        self.column = column
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert function symbol metadata into a dictionary representation."""
+        return {
+            "name": self.name,
+            "parameters": [
+                {"name": name, "type": dtype.value}
+                for name, dtype in self.parameters
+            ],
+            "return_type": self.return_type.value,
+            "line": self.line,
+            "column": self.column,
+        }
+
+    def __repr__(self) -> str:
+        param_strs = [f"{pname}: {ptype.value}" for pname, ptype in self.parameters]
+        return f"FunctionSymbol({self.name}({', '.join(param_strs)}) -> {self.return_type.value})"
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, FunctionSymbol):
+            return (
+                self.name == other.name
+                and self.parameters == other.parameters
+                and self.return_type == other.return_type
+            )
+        return False
+
 
 
 class SymbolTable:

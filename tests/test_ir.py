@@ -424,3 +424,100 @@ def test_ir_while_with_if_statement():
         assert g.target_label in labels
 
 
+# -------------------------------------------------------------
+# 5. User-Defined Functions IR Tests (Phase 7.4)
+# -------------------------------------------------------------
+
+def test_ir_function_declaration_and_call():
+    """Verify TAC generation for function declaration, return, and call."""
+    from ruleflow.ir.instructions import (
+        FunctionBoundaryInstruction,
+        ReturnInstruction,
+        FunctionCallInstruction,
+    )
+
+    code = """
+    FUNCTION DoubleVal(x: INTEGER) RETURNS INTEGER:
+        res = x * 2
+        RETURN res
+    END
+
+    RULE CallRule:
+        a = DoubleVal(5)
+    END
+    """
+    ir = generate_ir(code)
+
+    boundaries = [inst for inst in ir if isinstance(inst, FunctionBoundaryInstruction)]
+    assert len(boundaries) == 2
+    assert boundaries[0].is_start is True
+    assert boundaries[0].name == "DoubleVal"
+    assert boundaries[0].params == ["x"]
+    assert boundaries[1].is_start is False
+
+    returns = [inst for inst in ir if isinstance(inst, ReturnInstruction)]
+    assert len(returns) == 1
+
+    calls = [inst for inst in ir if isinstance(inst, FunctionCallInstruction)]
+    assert len(calls) == 1
+    assert calls[0].func_name == "DoubleVal"
+    assert len(calls[0].args) == 1
+
+    labels = [inst.label for inst in ir if isinstance(inst, LabelInstruction)]
+    gotos = [inst for inst in ir if isinstance(inst, JumpInstruction)]
+
+    assert "L_func_DoubleVal" in labels
+    assert any("L_func_skip_DoubleVal" in l for l in labels)
+    # The fallthrough jump skips the function
+    assert any("L_func_skip_DoubleVal" in g.target_label for g in gotos)
+
+
+def test_ir_multiple_functions_unique_labels():
+    """Verify unique labels and valid jump targets for multiple functions."""
+    code = """
+    FUNCTION FuncA(x: INTEGER) RETURNS INTEGER:
+        RETURN x + 1
+    END
+
+    FUNCTION FuncB(y: INTEGER) RETURNS INTEGER:
+        RETURN FuncA(y) * 2
+    END
+
+    RULE MultiFuncRule:
+        res = FuncB(10)
+    END
+    """
+    ir = generate_ir(code)
+    labels = [inst.label for inst in ir if isinstance(inst, LabelInstruction)]
+    assert len(labels) == len(set(labels))  # All labels are unique
+    assert "L_func_FuncA" in labels
+    assert any("L_func_skip_FuncA" in l for l in labels)
+    assert "L_func_FuncB" in labels
+    assert any("L_func_skip_FuncB" in l for l in labels)
+
+    # All jumps target known labels
+    gotos = [inst for inst in ir if isinstance(inst, JumpInstruction)]
+    for g in gotos:
+        assert g.target_label in labels
+
+
+def test_ir_function_instructions_classes():
+    """Verify methods and representations of FunctionBoundaryInstruction and ReturnInstruction."""
+    from ruleflow.ir.instructions import FunctionBoundaryInstruction, ReturnInstruction
+
+    start_boundary = FunctionBoundaryInstruction("Calc", ["a", "b"], is_start=True)
+    assert start_boundary.name == "Calc"
+    assert start_boundary.params == ["a", "b"]
+    assert "FUNC_START" in str(start_boundary)
+    assert start_boundary.to_dict()["name"] == "Calc"
+
+    end_boundary = FunctionBoundaryInstruction("Calc", is_start=False)
+    assert "FUNC_END" in str(end_boundary)
+
+    ret_inst = ReturnInstruction("t0")
+    assert ret_inst.value == "t0"
+    assert "RETURN t0" in str(ret_inst)
+    assert ret_inst.to_dict()["value"] == "t0"
+
+
+

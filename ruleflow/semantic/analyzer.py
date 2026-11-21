@@ -7,11 +7,14 @@ Performs:
 - Static detection of division or modulo by literal zero
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from ruleflow.ast.nodes import (
     ASTNode,
     ProgramNode,
     RuleDeclarationNode,
+    FunctionDeclarationNode,
+    ReturnStatementNode,
+    ParameterNode,
     IfStatementNode,
     WhileStatementNode,
     AssignmentNode,
@@ -22,7 +25,7 @@ from ruleflow.ast.nodes import (
     FunctionCallNode,
 )
 from .types import DataType
-from .symbol_table import SymbolTable, Symbol
+from .symbol_table import SymbolTable, Symbol, FunctionSymbol
 from .errors import SemanticError
 
 
@@ -45,6 +48,9 @@ class SemanticAnalyzer:
         # Backward-compatible dictionary representation of the active/last symbol table
         self.symbol_table: Dict[str, Any] = {}
         self.current_symbol_table: Optional[SymbolTable] = None
+        # Map of function name -> FunctionSymbol
+        self.function_symbols: Dict[str, FunctionSymbol] = {}
+        self.current_function: Optional[FunctionSymbol] = None
 
     def analyze(self, ast: Optional[ProgramNode] = None) -> bool:
         """Analyze the AST and populate symbol tables.
@@ -61,12 +67,16 @@ class SemanticAnalyzer:
 
         self.symbol_tables.clear()
         self.symbol_table.clear()
+        self.function_symbols.clear()
+        self.current_function = None
 
         has_rules = any(isinstance(stmt, RuleDeclarationNode) for stmt in tree_to_analyze.statements)
 
         if has_rules:
             for stmt in tree_to_analyze.statements:
-                if isinstance(stmt, RuleDeclarationNode):
+                if isinstance(stmt, FunctionDeclarationNode):
+                    self.analyze_function(stmt)
+                elif isinstance(stmt, RuleDeclarationNode):
                     self.analyze_rule(stmt)
                 else:
                     # Non-rule statement alongside rules
@@ -78,7 +88,10 @@ class SemanticAnalyzer:
             self.current_symbol_table = self.create_initial_symbol_table()
             self.symbol_tables["__global__"] = self.current_symbol_table
             for stmt in tree_to_analyze.statements:
-                self.analyze_statement(stmt)
+                if isinstance(stmt, FunctionDeclarationNode):
+                    self.analyze_function(stmt)
+                else:
+                    self.analyze_statement(stmt)
             self.symbol_table = self.current_symbol_table.to_dict()
 
         return True
@@ -110,6 +123,10 @@ class SemanticAnalyzer:
             self.analyze_if(stmt)
         elif isinstance(stmt, WhileStatementNode):
             self.analyze_while(stmt)
+        elif isinstance(stmt, ReturnStatementNode):
+            self.analyze_return(stmt)
+        elif isinstance(stmt, FunctionDeclarationNode):
+            self.analyze_function(stmt)
         elif isinstance(stmt, RuleDeclarationNode):
             self.analyze_rule(stmt)
         else:
@@ -268,6 +285,145 @@ class SemanticAnalyzer:
         # the loop are NOT definitely assigned afterward. Restore base table.
         self.current_symbol_table = base_table
 
+    def analyze_function(self, node: FunctionDeclarationNode) -> None:
+        """Analyze a user-defined FUNCTION declaration."""
+        # 1. Reject duplicate function names and built-in collisions
+        if node.name in self.function_symbols:
+            raise SemanticError(
+                f"Duplicate function name '{node.name}'",
+                line=node.line,
+                column=node.column,
+                identifier=node.name,
+            )
+        if node.name.upper() in ("ABS", "MIN", "MAX", "ROUND", "LENGTH"):
+            raise SemanticError(
+                f"Function name '{node.name}' conflicts with built-in function",
+                line=node.line,
+                column=node.column,
+                identifier=node.name,
+            )
+
+        # 2. Validate return type
+        try:
+            return_type = DataType.from_value(node.return_type)
+        except ValueError:
+            raise SemanticError(
+                f"Invalid return type '{node.return_type}' in function '{node.name}'",
+                line=node.line,
+                column=node.column,
+            )
+        if return_type == DataType.UNKNOWN:
+            raise SemanticError(
+                f"Unsupported return type '{node.return_type}' in function '{node.name}'",
+                line=node.line,
+                column=node.column,
+            )
+
+        # 3. Validate parameter types and reject duplicate parameters
+        parsed_params: List[Tuple[str, DataType]] = []
+        seen_params: Set[str] = set()
+
+        for param in node.parameters:
+            if param.name in seen_params:
+                raise SemanticError(
+                    f"Duplicate parameter '{param.name}' in function '{node.name}'",
+                    line=param.line,
+                    column=param.column,
+                    identifier=param.name,
+                )
+            seen_params.add(param.name)
+
+            try:
+                p_type = DataType.from_value(param.data_type)
+            except ValueError:
+                raise SemanticError(
+                    f"Invalid type '{param.data_type}' for parameter '{param.name}' in function '{node.name}'",
+                    line=param.line,
+                    column=param.column,
+                )
+            if p_type == DataType.UNKNOWN:
+                raise SemanticError(
+                    f"Unsupported type '{param.data_type}' for parameter '{param.name}' in function '{node.name}'",
+                    line=param.line,
+                    column=param.column,
+                )
+            parsed_params.append((param.name, p_type))
+
+        # 4. Check return path
+        if not node.body:
+            raise SemanticError(
+                f"Function '{node.name}' has empty body and is missing a RETURN statement",
+                line=node.line,
+                column=node.column,
+                identifier=node.name,
+            )
+
+        return_nodes = [s for s in node.body if isinstance(s, ReturnStatementNode)]
+        if not return_nodes:
+            raise SemanticError(
+                f"Function '{node.name}' is missing a RETURN statement",
+                line=node.line,
+                column=node.column,
+                identifier=node.name,
+            )
+        if not isinstance(node.body[-1], ReturnStatementNode) or len(return_nodes) > 1:
+            raise SemanticError(
+                f"Multiple or conditional return paths in function '{node.name}' are not supported; return must be the final statement",
+                line=node.line,
+                column=node.column,
+                identifier=node.name,
+            )
+
+        func_sym = FunctionSymbol(
+            name=node.name,
+            parameters=parsed_params,
+            return_type=return_type,
+            line=node.line,
+            column=node.column,
+        )
+
+        # 5. Create isolated local scope for function body
+        prev_symtab = self.current_symbol_table
+        prev_func = self.current_function
+
+        func_symtab = SymbolTable()
+        for p_name, p_type in parsed_params:
+            func_symtab.define(p_name, p_type, is_input=True, line=node.line, column=node.column)
+
+        self.symbol_tables[f"FUNCTION_{node.name}"] = func_symtab
+        self.current_symbol_table = func_symtab
+        self.current_function = func_sym
+
+        # 6. Analyze statements in body
+        for stmt in node.body:
+            self.analyze_statement(stmt)
+
+        # 7. Register function symbol now that declaration-order analysis is complete
+        self.function_symbols[node.name] = func_sym
+
+        # Restore previous scope
+        self.current_symbol_table = prev_symtab
+        self.current_function = prev_func
+
+    def analyze_return(self, node: ReturnStatementNode) -> None:
+        """Analyze a RETURN statement and verify type compatibility with the enclosing function."""
+        if self.current_function is None:
+            raise SemanticError(
+                "RETURN statement outside of function declaration",
+                line=node.line,
+                column=node.column,
+            )
+        expr_type = self.analyze_expression(node.expression)
+        expected_type = self.current_function.return_type
+
+        # Verify type compatibility (including widening)
+        if not expected_type.is_compatible_with(expr_type):
+            raise SemanticError(
+                f"Function '{self.current_function.name}' declared to return {expected_type.value}, but RETURN expression has incompatible type {expr_type.value}",
+                line=node.line,
+                column=node.column,
+            )
+
     def analyze_expression(self, node: ASTNode) -> DataType:
         """Infer and validate the data type of an expression node."""
         if isinstance(node, LiteralNode):
@@ -304,6 +460,34 @@ class SemanticAnalyzer:
             return sym.data_type
 
         if isinstance(node, FunctionCallNode):
+            # 1. Check user-defined function symbols
+            if node.name in self.function_symbols:
+                func_sym = self.function_symbols[node.name]
+                if len(node.args) != len(func_sym.parameters):
+                    raise SemanticError(
+                        f"Function '{node.name}' expects {len(func_sym.parameters)} argument(s), got {len(node.args)}",
+                        line=node.line,
+                        column=node.column,
+                    )
+                for idx, (p_name, expected_type) in enumerate(func_sym.parameters):
+                    arg_type = self.analyze_expression(node.args[idx])
+                    if not expected_type.is_compatible_with(arg_type):
+                        raise SemanticError(
+                            f"Function '{node.name}' parameter '{p_name}' expected {expected_type.value}, got {arg_type.value}",
+                            line=node.line,
+                            column=node.column,
+                        )
+                return func_sym.return_type
+
+            # 2. Check for recursive call attempt
+            if self.current_function is not None and node.name == self.current_function.name:
+                raise SemanticError(
+                    f"Recursive function call to '{node.name}' is not supported",
+                    line=node.line,
+                    column=node.column,
+                )
+
+            # 3. Built-in functions
             func_name = node.name.upper()
             if func_name not in ("ABS", "MIN", "MAX", "ROUND", "LENGTH"):
                 raise SemanticError(

@@ -1,6 +1,6 @@
 """Direct Three-Address Code (TAC) interpreter for RuleFlow Compiler."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from ruleflow.ir.instructions import (
     Instruction,
     Constant,
@@ -13,6 +13,8 @@ from ruleflow.ir.instructions import (
     JumpIfTrueInstruction,
     RuleBoundaryInstruction,
     FunctionCallInstruction,
+    FunctionBoundaryInstruction,
+    ReturnInstruction,
 )
 from .runtime import RuntimeEnvironment
 from .errors import ExecutionError
@@ -96,11 +98,21 @@ class TACInterpreter:
         Returns:
             ExecutionResult with final status, named outputs, environment, and trace.
         """
-        # Step 1: Pre-index label positions
+        # Step 1: Pre-index label positions and user-defined functions
         label_map: Dict[str, int] = {}
+        function_map: Dict[str, Dict[str, Any]] = {}
         for idx, inst in enumerate(self.instructions):
             if isinstance(inst, LabelInstruction):
                 label_map[inst.label] = idx
+            elif isinstance(inst, FunctionBoundaryInstruction) and inst.is_start:
+                entry_label = f"L_func_{inst.name}"
+                function_map[inst.name] = {
+                    "entry_label": entry_label,
+                    "params": inst.params,
+                }
+
+        # Call frame stack: list of (return_pc, target_var, caller_env, func_name)
+        call_stack: List[Tuple[int, str, RuntimeEnvironment, str]] = []
 
         pc = 0
         step = 0
@@ -208,9 +220,46 @@ class TACInterpreter:
                         trace.append(f"Step {step:04d} | PC {pc:03d} | IF_TRUE ({repr(cond_val)}) -> Fallthrough")
                         pc += 1
 
-                # 8. Function Call
+                # 8. Function Call (User-Defined or Built-In)
                 elif isinstance(inst, FunctionCallInstruction):
                     arg_vals = [self.resolve_operand(a) for a in inst.args]
+
+                    # 8a. User-Defined Function Call
+                    if inst.func_name in function_map:
+                        func_info = function_map[inst.func_name]
+                        params = func_info["params"]
+                        if len(arg_vals) != len(params):
+                            raise ExecutionError(
+                                f"Function '{inst.func_name}' expects {len(params)} argument(s), got {len(arg_vals)}.",
+                                instruction=inst,
+                                step=step,
+                            )
+                        entry_label = func_info["entry_label"]
+                        if entry_label not in label_map:
+                            raise ExecutionError(
+                                f"Function entry label '{entry_label}' does not exist for function '{inst.func_name}'.",
+                                instruction=inst,
+                                step=step,
+                            )
+
+                        args_repr = ", ".join(repr(a) for a in arg_vals)
+                        trace.append(
+                            f"Step {step:04d} | PC {pc:03d} | CALL {inst.func_name}({args_repr}) -> JUMP to {entry_label}"
+                        )
+
+                        # Push caller frame
+                        call_stack.append((pc + 1, inst.target, self.env, inst.func_name))
+
+                        # Create isolated local environment for the function
+                        func_env = RuntimeEnvironment()
+                        for p_name, a_val in zip(params, arg_vals):
+                            func_env.set_input(p_name, a_val)
+
+                        self.env = func_env
+                        pc = label_map[entry_label] + 1
+                        continue
+
+                    # 8b. Built-In Function Call
                     res = self._execute_function_call(inst.func_name, arg_vals, step, inst)
                     self.env.set(inst.target, res)
                     args_repr = ", ".join(repr(a) for a in arg_vals)
@@ -219,7 +268,30 @@ class TACInterpreter:
                     )
                     pc += 1
 
-                # 9. Rule Boundary
+                # 9. Return Instruction
+                elif isinstance(inst, ReturnInstruction):
+                    ret_val = self.resolve_operand(inst.value)
+                    if not call_stack:
+                        raise ExecutionError(
+                            "RETURN instruction encountered without an active function call frame.",
+                            instruction=inst,
+                            step=step,
+                        )
+                    return_pc, target_var, caller_env, func_name = call_stack.pop()
+                    caller_env.set(target_var, ret_val)
+                    self.env = caller_env
+                    trace.append(
+                        f"Step {step:04d} | PC {pc:03d} | RETURN {repr(ret_val)} from {func_name} -> {target_var} in caller | Resume PC {return_pc:03d}"
+                    )
+                    pc = return_pc
+
+                # 10. Function Boundary
+                elif isinstance(inst, FunctionBoundaryInstruction):
+                    prefix = "FUNC_START" if inst.is_start else "FUNC_END"
+                    trace.append(f"Step {step:04d} | PC {pc:03d} | {prefix} {inst.name}")
+                    pc += 1
+
+                # 11. Rule Boundary
                 elif isinstance(inst, RuleBoundaryInstruction):
                     boundary = "RULE_START" if inst.is_start else "RULE_END"
                     trace.append(f"Step {step:04d} | PC {pc:03d} | {boundary} {inst.name}")
@@ -237,10 +309,11 @@ class TACInterpreter:
             )
 
         except ExecutionError as err:
+            top_env = call_stack[0][2] if call_stack else self.env
             return ExecutionResult(
                 status="failed",
-                outputs=self.env.get_outputs(),
-                environment=self.env.snapshot(),
+                outputs=top_env.get_outputs(),
+                environment=top_env.snapshot(),
                 step_count=step,
                 trace=trace,
                 error=err.message,

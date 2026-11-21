@@ -22,6 +22,8 @@ from ruleflow.ir.instructions import (
     JumpIfTrueInstruction,
     RuleBoundaryInstruction,
     FunctionCallInstruction,
+    FunctionBoundaryInstruction,
+    ReturnInstruction,
 )
 
 
@@ -84,7 +86,7 @@ class Optimizer:
 
         for inst in instructions:
             # Conservative control-flow boundary safety:
-            # Clear known constants at labels, jumps, and rule boundaries
+            # Clear known constants at labels, jumps, boundaries, and returns
             if isinstance(
                 inst,
                 (
@@ -93,6 +95,8 @@ class Optimizer:
                     JumpIfFalseInstruction,
                     JumpIfTrueInstruction,
                     RuleBoundaryInstruction,
+                    FunctionBoundaryInstruction,
+                    ReturnInstruction,
                 ),
             ):
                 # Before clearing on conditional jump, propagate condition if known
@@ -110,6 +114,17 @@ class Optimizer:
                             )
                         self.transformations.append(
                             f"Propagated constant: {cond} = {new_cond} into jump condition"
+                        )
+                        changed = True
+                    else:
+                        new_instructions.append(inst)
+                elif isinstance(inst, ReturnInstruction):
+                    val = inst.value
+                    if isinstance(val, str) and val in known_constants:
+                        new_val = known_constants[val]
+                        new_instructions.append(ReturnInstruction(value=new_val))
+                        self.transformations.append(
+                            f"Propagated constant into return: {val} = {new_val}"
                         )
                         changed = True
                     else:
@@ -251,18 +266,20 @@ class Optimizer:
                         continue
 
             elif isinstance(inst, FunctionCallInstruction):
-                if all(isinstance(arg, Constant) for arg in inst.args):
-                    arg_values = [arg.value for arg in inst.args]
-                    folded_val = self._evaluate_function_call(inst.func_name, arg_values)
-                    if folded_val is not None:
-                        new_instructions.append(
-                            AssignInstruction(inst.target, Constant(folded_val))
-                        )
-                        self.transformations.append(
-                            f"Constant folded: {inst.func_name}({', '.join(str(v) for v in arg_values)}) -> {folded_val} ({inst.target})"
-                        )
-                        changed = True
-                        continue
+                # Only fold pure built-in functions
+                if inst.func_name.upper() in ("ABS", "MIN", "MAX", "ROUND", "LENGTH"):
+                    if all(isinstance(arg, Constant) for arg in inst.args):
+                        arg_values = [arg.value for arg in inst.args]
+                        folded_val = self._evaluate_function_call(inst.func_name, arg_values)
+                        if folded_val is not None:
+                            new_instructions.append(
+                                AssignInstruction(inst.target, Constant(folded_val))
+                            )
+                            self.transformations.append(
+                                f"Constant folded: {inst.func_name}({', '.join(str(v) for v in arg_values)}) -> {folded_val} ({inst.target})"
+                            )
+                            changed = True
+                            continue
 
             new_instructions.append(inst)
 
@@ -402,11 +419,20 @@ class Optimizer:
                 for arg in inst.args:
                     if isinstance(arg, str):
                         used_vars.add(arg)
+            elif isinstance(inst, ReturnInstruction):
+                if isinstance(inst.value, str):
+                    used_vars.add(inst.value)
 
         new_instructions: List[Instruction] = []
         changed = False
 
         for inst in instructions:
+            # Preserve user-defined function calls (do not eliminate even if target unused)
+            if isinstance(inst, FunctionCallInstruction):
+                if inst.func_name.upper() not in ("ABS", "MIN", "MAX", "ROUND", "LENGTH"):
+                    new_instructions.append(inst)
+                    continue
+
             # Check if this instruction defines an unused temporary variable (e.g. t1, t2)
             if isinstance(inst, (AssignInstruction, BinaryOpInstruction, UnaryOpInstruction, FunctionCallInstruction)):
                 target = inst.target

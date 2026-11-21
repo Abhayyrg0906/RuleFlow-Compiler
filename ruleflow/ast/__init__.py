@@ -13,6 +13,9 @@ from .nodes import (
     LiteralNode,
     IdentifierNode,
     FunctionCallNode,
+    ParameterNode,
+    ReturnStatementNode,
+    FunctionDeclarationNode,
 )
 
 __all__ = [
@@ -28,4 +31,7 @@ __all__ = [
     "LiteralNode",
     "IdentifierNode",
     "FunctionCallNode",
+    "ParameterNode",
+    "ReturnStatementNode",
+    "FunctionDeclarationNode",
 ]

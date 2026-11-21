@@ -984,3 +984,225 @@ def test_execution_while_loop_example_file():
         assert res.outputs["result"] == 15
 
 
+# -------------------------------------------------------------
+# User-Defined Functions Execution Tests (Phase 7.4)
+# -------------------------------------------------------------
+
+def test_execution_basic_function_call():
+    """Test: Execute a basic single-parameter user-defined function."""
+    code = """
+    FUNCTION CalculateSquare(n: INTEGER) RETURNS INTEGER:
+        RETURN n * n
+    END
+
+    RULE MathRule:
+        res = CalculateSquare(9)
+    END
+    """
+    for opt in [False, True]:
+        res = run_pipeline(code, optimize=opt)
+        assert res.status == "success"
+        assert res.outputs["res"] == 81
+
+
+def test_execution_multiple_parameters_and_widening():
+    """Test: Execute a function with multiple parameters and INTEGER to DECIMAL widening."""
+    code = """
+    FUNCTION CalculateBonus(salary: DECIMAL, percentage: DECIMAL) RETURNS DECIMAL:
+        bonus = salary * percentage / 100
+        RETURN bonus
+    END
+
+    RULE SalaryRule:
+        salary = 60000
+        bonus = CalculateBonus(salary, 15)
+        total = salary + bonus
+    END
+    """
+    for opt in [False, True]:
+        res = run_pipeline(code, optimize=opt)
+        assert res.status == "success"
+        assert res.outputs["salary"] == 60000
+        assert res.outputs["bonus"] == 9000.0
+        assert res.outputs["total"] == 69000.0
+
+
+def test_execution_zero_parameters():
+    """Test: Execute a function with zero parameters."""
+    code = """
+    FUNCTION GetDiscountRate() RETURNS DECIMAL:
+        RETURN 0.12
+    END
+
+    RULE OrderRule:
+        rate = GetDiscountRate()
+    END
+    """
+    for opt in [False, True]:
+        res = run_pipeline(code, optimize=opt)
+        assert res.status == "success"
+        assert res.outputs["rate"] == 0.12
+
+
+def test_execution_function_calling_another_function():
+    """Test: Execute a function calling another previously declared function."""
+    code = """
+    FUNCTION DoubleVal(x: INTEGER) RETURNS INTEGER:
+        RETURN x * 2
+    END
+
+    FUNCTION QuadVal(y: INTEGER) RETURNS INTEGER:
+        d = DoubleVal(y)
+        RETURN DoubleVal(d)
+    END
+
+    RULE RunQuad:
+        val = QuadVal(5)
+    END
+    """
+    for opt in [False, True]:
+        res = run_pipeline(code, optimize=opt)
+        assert res.status == "success"
+        assert res.outputs["val"] == 20
+
+
+def test_execution_multiple_function_calls_in_expression():
+    """Test: Execute multiple function calls inside a compound expression."""
+    code = """
+    FUNCTION Add(a: INTEGER, b: INTEGER) RETURNS INTEGER:
+        RETURN a + b
+    END
+
+    RULE CompoundRule:
+        x = Add(10, 20) + Add(5, 5) * 2
+    END
+    """
+    for opt in [False, True]:
+        res = run_pipeline(code, optimize=opt)
+        assert res.status == "success"
+        # 30 + 10 * 2 = 50
+        assert res.outputs["x"] == 50
+
+
+def test_execution_function_in_if_branch():
+    """Test: Execute function calls within conditional IF/ELSE IF/ELSE branches."""
+    code = """
+    FUNCTION GetTierBonus(tier: STRING) RETURNS DECIMAL:
+        IF tier == "GOLD" THEN
+            b = 100.0
+        ELSE
+            b = 50.0
+        END
+        RETURN b
+    END
+
+    RULE TierRule:
+        bonus = GetTierBonus("GOLD")
+    END
+    """
+    for opt in [False, True]:
+        res = run_pipeline(code, optimize=opt)
+        assert res.status == "success"
+        assert res.outputs["bonus"] == 100.0
+
+
+def test_execution_function_in_while_loop():
+    """Test: Execute function calls inside a WHILE loop condition and body."""
+    code = """
+    FUNCTION Decrement(n: INTEGER) RETURNS INTEGER:
+        RETURN n - 1
+    END
+
+    RULE LoopFunc:
+        count = 5
+        sum = 0
+        WHILE count > 0 DO
+            sum = sum + count
+            count = Decrement(count)
+        END
+    END
+    """
+    for opt in [False, True]:
+        res = run_pipeline(code, optimize=opt)
+        assert res.status == "success"
+        assert res.outputs["sum"] == 15
+        assert res.outputs["count"] == 0
+
+
+def test_execution_local_variables_isolation():
+    """Test: Confirm that internal local variables from functions never leak into outputs."""
+    code = """
+    FUNCTION Secretive(n: INTEGER) RETURNS INTEGER:
+        internal_var = n * 10
+        another_temp = 99
+        RETURN internal_var
+    END
+
+    RULE ScopeCheck:
+        out = Secretive(3)
+    END
+    """
+    res = run_pipeline(code)
+    assert res.status == "success"
+    assert res.outputs["out"] == 30
+    assert "internal_var" not in res.outputs
+    assert "another_temp" not in res.outputs
+    assert "n" not in res.outputs
+
+
+def test_execution_function_runtime_division_by_zero():
+    """Test: Runtime error inside a function aborts execution safely."""
+    code = """
+    FUNCTION Broken(x: DECIMAL) RETURNS DECIMAL:
+        y = 0.0
+        RETURN x / y
+    END
+
+    RULE TriggerError:
+        res = Broken(10.0)
+    END
+    """
+    res = run_pipeline(code)
+    assert res.status == "failed"
+    assert "Division by zero" in res.error
+
+
+def test_execution_user_defined_functions_example_file():
+    """Test: Execute examples/user_defined_functions.rf end-to-end."""
+    path = Path(__file__).parent.parent / "examples" / "user_defined_functions.rf"
+    code = path.read_text(encoding="utf-8")
+
+    for opt in [False, True]:
+        res = run_pipeline(code, optimize=opt)
+        assert res.status == "success"
+        assert res.outputs["salary"] == 50000
+        assert res.outputs["bonus"] == 5000.0
+        assert res.outputs["square"] == 64
+        assert res.outputs["final_salary"] == 55000.0
+
+
+def test_execution_optimized_vs_unoptimized_equivalence_for_functions():
+    """Test: Verify unoptimized vs optimized outputs are identical for function programs."""
+    code = """
+    FUNCTION Compute(base: INTEGER, factor: INTEGER) RETURNS INTEGER:
+        step1 = base * factor
+        step2 = step1 + 10
+        RETURN step2
+    END
+
+    RULE CheckEquiv:
+        v1 = Compute(5, 2)
+        v2 = Compute(10, 3)
+        total = v1 + v2
+    END
+    """
+    res_unopt = run_pipeline(code, optimize=False)
+    res_opt = run_pipeline(code, optimize=True)
+
+    assert res_unopt.status == "success"
+    assert res_opt.status == "success"
+    assert res_unopt.outputs == res_opt.outputs
+    assert res_opt.outputs["total"] == 60  # (5*2+10) + (10*3+10) = 20 + 40 = 60
+
+
+

@@ -11,6 +11,8 @@ from ruleflow.ast.nodes import (
     RuleDeclarationNode,
     IfStatementNode,
     WhileStatementNode,
+    FunctionDeclarationNode,
+    ReturnStatementNode,
     AssignmentNode,
     BinaryOpNode,
     UnaryOpNode,
@@ -30,6 +32,8 @@ from .instructions import (
     JumpIfTrueInstruction,
     RuleBoundaryInstruction,
     FunctionCallInstruction,
+    FunctionBoundaryInstruction,
+    ReturnInstruction,
 )
 
 
@@ -80,7 +84,11 @@ class IRGenerator:
 
     def generate_statement(self, stmt: ASTNode) -> None:
         """Dispatch generation for a statement node."""
-        if isinstance(stmt, RuleDeclarationNode):
+        if isinstance(stmt, FunctionDeclarationNode):
+            self.generate_function(stmt)
+        elif isinstance(stmt, ReturnStatementNode):
+            self.generate_return(stmt)
+        elif isinstance(stmt, RuleDeclarationNode):
             self.generate_rule(stmt)
         elif isinstance(stmt, AssignmentNode):
             self.generate_assignment(stmt)
@@ -91,6 +99,32 @@ class IRGenerator:
         else:
             # Standalone expression
             self.generate_expression(stmt)
+
+    def generate_function(self, node: FunctionDeclarationNode) -> None:
+        """Generate TAC for a user-defined FUNCTION declaration."""
+        skip_label = self.new_label(f"L_func_skip_{node.name}")
+        entry_label = f"L_func_{node.name}"
+
+        # 1. Unconditional jump to skip over function body during linear execution
+        self.emit(JumpInstruction(target_label=skip_label))
+
+        # 2. Function entry label
+        self.emit(LabelInstruction(label=entry_label))
+        param_names = [p.name for p in node.parameters]
+        self.emit(FunctionBoundaryInstruction(name=node.name, params=param_names, is_start=True))
+
+        # 3. Function body statements
+        for stmt in node.body:
+            self.generate_statement(stmt)
+
+        # 4. Function end demarcation and skip label
+        self.emit(FunctionBoundaryInstruction(name=node.name, params=param_names, is_start=False))
+        self.emit(LabelInstruction(label=skip_label))
+
+    def generate_return(self, node: ReturnStatementNode) -> None:
+        """Generate TAC for a RETURN statement."""
+        ret_val = self.generate_expression(node.expression)
+        self.emit(ReturnInstruction(value=ret_val))
 
     def generate_rule(self, rule: RuleDeclarationNode) -> None:
         """Generate IR for a RULE block bounded by rule demarcations."""
@@ -171,7 +205,7 @@ class IRGenerator:
         if isinstance(node, FunctionCallNode):
             arg_vals = [self.generate_expression(arg) for arg in node.args]
             temp = self.new_temp()
-            self.emit(FunctionCallInstruction(target=temp, func_name=node.name.upper(), args=arg_vals))
+            self.emit(FunctionCallInstruction(target=temp, func_name=node.name, args=arg_vals))
             return temp
 
         if isinstance(node, UnaryOpNode):

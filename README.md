@@ -65,7 +65,8 @@ RuleFlow-Compiler/
 │   ├── discount_calculation.rf
 │   ├── grade_evaluation.rf
 │   ├── builtin_functions.rf
-│   └── while_loop.rf
+│   ├── while_loop.rf
+│   └── user_defined_functions.rf
 │
 └── tests/                     # Unit and integration tests
     ├── __init__.py
@@ -259,6 +260,62 @@ Verify all compiler modules using `pytest`:
 - [x] **Phase 7.1: Multi-way Branching with ELSE IF**
 - [x] **Phase 7.2: Built-in Function Support (ABS, MIN, MAX, ROUND, LENGTH)**
 - [x] **Phase 7.3: Iterative Control Flow with WHILE Loops**
+- [x] **Phase 7.4: User-Defined Functions (FUNCTION, RETURNS, RETURN, Scope Isolation, Call Frames)**
+
+---
+
+## 🧩 User-Defined Functions (Phase 7.4)
+
+RuleFlow supports top-level user-defined functions with typed formal parameters, explicit return types, strict scope isolation, and declaration-order resolution.
+
+### Grammar
+```ebnf
+function_declaration ::= FUNCTION identifier "(" [ parameter_list ] ")" RETURNS type ":" statement* return_statement END
+parameter_list       ::= parameter ( "," parameter )*
+parameter            ::= identifier ":" type
+return_statement     ::= RETURN expression
+type                 ::= INTEGER | DECIMAL | BOOLEAN | STRING
+```
+
+### Example
+```ruleflow
+FUNCTION CalculateBonus(salary: DECIMAL, percentage: DECIMAL) RETURNS DECIMAL:
+    bonus = salary * percentage / 100
+    RETURN bonus
+END
+
+FUNCTION CalculateSquare(n: INTEGER) RETURNS INTEGER:
+    RETURN n * n
+END
+
+RULE EmployeeSalary:
+    salary = 50000
+    bonus = CalculateBonus(salary, 10)
+    square = CalculateSquare(8)
+    final_salary = salary + bonus
+END
+```
+
+### Semantics & Architecture
+1. **Top-Level Declarations**: Functions are declared before rules or other statements at the top level.
+2. **Declaration-Order Resolution**: Functions must be declared before they are called. Forward references and circular dependencies are rejected statically with `SemanticError`.
+3. **No Direct or Mutual Recursion**: Recursive calls are detected and rejected statically, maintaining deterministic rule evaluation.
+4. **Scope Isolation**:
+   - Each function executes within its own isolated `SymbolTable` and runtime call frame.
+   - Formal parameters and local variables declared inside a function do not leak into the caller scope or rule scope.
+   - Rule-level variables are not visible inside functions unless passed explicitly as arguments.
+5. **Type Checking & Widening**:
+   - Arguments must match declared parameter types in count and type (`INTEGER` to `DECIMAL` widening is supported).
+   - The returned expression must match the function's declared return type (`INTEGER` to `DECIMAL` return widening is supported).
+   - Functions must terminate with a single `RETURN` statement.
+6. **TAC & Execution Engine**:
+   - Intermediate code skips over function bodies on fallthrough (`GOTO L_func_skip_<name>`).
+   - Function calls emit `CALL target, func_name(args)`.
+   - The runtime interpreter manages an activation stack (`call_stack`), pushing caller state and allocating a fresh `RuntimeEnvironment` for parameters and local variables, and popping/restoring state upon executing `RETURN`.
+7. **Optimization Safety**:
+   - User-defined function calls are preserved during dead code elimination to guard against side effects.
+   - Function boundary and return instructions act as control-flow barriers that reset active constant propagation maps.
+
 
 ---
 

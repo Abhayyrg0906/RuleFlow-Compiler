@@ -50,7 +50,7 @@ st.sidebar.markdown("---")
 st.sidebar.header("🏷️ External Input Variables")
 default_inputs = (
     ""
-    if "while_loop" in selected_example_name
+    if ("while_loop" in selected_example_name or "user_defined_functions" in selected_example_name)
     else (
         "score: INTEGER\ntax_rate: DECIMAL\nstudent_name: STRING"
         if "builtin_functions" in selected_example_name
@@ -88,7 +88,7 @@ st.sidebar.markdown("---")
 st.sidebar.header("🎮 Runtime Input Values")
 default_values_text = (
     ""
-    if "while_loop" in selected_example_name
+    if ("while_loop" in selected_example_name or "user_defined_functions" in selected_example_name)
     else (
         'score = 85\ntax_rate = 18.75\nstudent_name = "RuleFlow"'
         if "builtin_functions" in selected_example_name

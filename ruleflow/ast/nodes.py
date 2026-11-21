@@ -397,3 +397,102 @@ class FunctionCallNode(ASTNode):
 
     def __repr__(self) -> str:
         return f"FunctionCallNode(name={repr(self.name)}, args={len(self.args)})"
+
+
+class ParameterNode(ASTNode):
+    """Represents a formal parameter in a function declaration (name: data_type)."""
+
+    def __init__(self, name: str, data_type: str, line: int = 1, column: int = 1):
+        super().__init__(line, column)
+        self.name = name
+        self.data_type = data_type
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "node_type": "ParameterNode",
+            "name": self.name,
+            "data_type": self.data_type,
+            "line": self.line,
+            "column": self.column,
+        }
+
+    def pretty(self, indent: int = 0) -> str:
+        space = "  " * indent
+        return f"{space}ParameterNode: {self.name}: {self.data_type} (line {self.line}, col {self.column})"
+
+    def __repr__(self) -> str:
+        return f"ParameterNode(name={repr(self.name)}, data_type={repr(self.data_type)})"
+
+
+class ReturnStatementNode(ASTNode):
+    """Represents a RETURN statement returning an expression."""
+
+    def __init__(self, expression: ASTNode, line: int = 1, column: int = 1):
+        super().__init__(line, column)
+        self.expression = expression
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "node_type": "ReturnStatementNode",
+            "expression": self.expression.to_dict(),
+            "line": self.line,
+            "column": self.column,
+        }
+
+    def pretty(self, indent: int = 0) -> str:
+        space = "  " * indent
+        lines = [f"{space}ReturnStatementNode (line {self.line}, col {self.column}):"]
+        lines.append(self.expression.pretty(indent + 1))
+        return "\n".join(lines)
+
+    def __repr__(self) -> str:
+        return f"ReturnStatementNode(expression={self.expression})"
+
+
+class FunctionDeclarationNode(ASTNode):
+    """Represents a top-level user-defined FUNCTION declaration."""
+
+    def __init__(
+        self,
+        name: str,
+        parameters: Optional[List[ParameterNode]] = None,
+        return_type: str = "INTEGER",
+        body: Optional[List[ASTNode]] = None,
+        line: int = 1,
+        column: int = 1,
+    ):
+        super().__init__(line, column)
+        self.name = name
+        self.parameters: List[ParameterNode] = parameters or []
+        self.return_type = return_type
+        self.body: List[ASTNode] = body or []
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "node_type": "FunctionDeclarationNode",
+            "name": self.name,
+            "parameters": [p.to_dict() for p in self.parameters],
+            "return_type": self.return_type,
+            "body": [stmt.to_dict() for stmt in self.body],
+            "line": self.line,
+            "column": self.column,
+        }
+
+    def pretty(self, indent: int = 0) -> str:
+        space = "  " * indent
+        lines = [
+            f"{space}FunctionDeclarationNode: '{self.name}' (line {self.line}, col {self.column}):"
+        ]
+        if self.parameters:
+            lines.append(f"{space}  Parameters:")
+            for p in self.parameters:
+                lines.append(p.pretty(indent + 2))
+        lines.append(f"{space}  Returns: {self.return_type}")
+        lines.append(f"{space}  Body:")
+        for stmt in self.body:
+            lines.append(stmt.pretty(indent + 2))
+        return "\n".join(lines)
+
+    def __repr__(self) -> str:
+        return f"FunctionDeclarationNode(name={repr(self.name)}, params={len(self.parameters)}, return_type={repr(self.return_type)}, body={len(self.body)})"
+

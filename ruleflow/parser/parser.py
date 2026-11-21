@@ -20,6 +20,9 @@ from ruleflow.ast.nodes import (
     LiteralNode,
     IdentifierNode,
     FunctionCallNode,
+    ParameterNode,
+    ReturnStatementNode,
+    FunctionDeclarationNode,
 )
 from .errors import ParserError
 
@@ -103,6 +106,10 @@ class Parser:
 
     def parse_statement(self) -> ASTNode:
         """Parse a top-level or block statement."""
+        if self.check(TokenType.FUNCTION):
+            return self.parse_function()
+        if self.check(TokenType.RETURN):
+            return self.parse_return()
         if self.check(TokenType.RULE):
             return self.parse_rule()
         if self.check(TokenType.IF):
@@ -137,8 +144,8 @@ class Parser:
             self.advance()
 
         body: List[ASTNode] = []
-        # Parse statements inside rule until EOF, another RULE, or an explicit END
-        while not self.check(TokenType.EOF, TokenType.RULE, TokenType.END):
+        # Parse statements inside rule until EOF, another RULE, FUNCTION, or an explicit END
+        while not self.check(TokenType.EOF, TokenType.RULE, TokenType.FUNCTION, TokenType.END):
             body.append(self.parse_statement())
 
         # Optional closing END for the rule declaration
@@ -227,6 +234,72 @@ class Parser:
             line=while_tok.line,
             column=while_tok.column,
         )
+
+    def parse_function(self) -> FunctionDeclarationNode:
+        """Parse a FUNCTION declaration.
+
+        Grammar:
+            function_declaration ::=
+                FUNCTION IDENTIFIER LPAREN parameter_list? RPAREN
+                RETURNS type_name COLON
+                function_body
+                END
+        """
+        func_tok = self.expect(TokenType.FUNCTION, "Expected 'FUNCTION' keyword")
+        name_tok = self.expect(
+            TokenType.IDENTIFIER,
+            "Expected function name identifier after 'FUNCTION'",
+        )
+        self.expect(TokenType.LPAREN, "Expected '(' after function name")
+
+        parameters: List[ParameterNode] = []
+        if not self.check(TokenType.RPAREN):
+            while True:
+                p_name = self.expect(TokenType.IDENTIFIER, "Expected parameter name")
+                self.expect(TokenType.COLON, "Expected ':' after parameter name")
+                p_type = self.expect(TokenType.IDENTIFIER, "Expected parameter type")
+                parameters.append(
+                    ParameterNode(
+                        name=p_name.value,
+                        data_type=p_type.value,
+                        line=p_name.line,
+                        column=p_name.column,
+                    )
+                )
+                if self.check(TokenType.COMMA):
+                    self.advance()
+                else:
+                    break
+
+        self.expect(TokenType.RPAREN, "Expected ')' after parameter list")
+        self.expect(TokenType.RETURNS, "Expected 'RETURNS' keyword in function declaration")
+        ret_type_tok = self.expect(TokenType.IDENTIFIER, "Expected return type name after 'RETURNS'")
+        self.expect(TokenType.COLON, "Expected ':' after return type")
+
+        body: List[ASTNode] = []
+        while not self.check(TokenType.END, TokenType.EOF, TokenType.RULE, TokenType.FUNCTION):
+            body.append(self.parse_statement())
+
+        self.expect(TokenType.END, "Expected 'END' to close FUNCTION declaration")
+
+        return FunctionDeclarationNode(
+            name=name_tok.value,
+            parameters=parameters,
+            return_type=ret_type_tok.value,
+            body=body,
+            line=func_tok.line,
+            column=func_tok.column,
+        )
+
+    def parse_return(self) -> ReturnStatementNode:
+        """Parse a RETURN statement.
+
+        Grammar:
+            return_statement ::= RETURN expression
+        """
+        ret_tok = self.expect(TokenType.RETURN, "Expected 'RETURN' keyword")
+        expr = self.parse_expression()
+        return ReturnStatementNode(expression=expr, line=ret_tok.line, column=ret_tok.column)
 
     def parse_assignment(self) -> AssignmentNode:
         """Parse a variable assignment.

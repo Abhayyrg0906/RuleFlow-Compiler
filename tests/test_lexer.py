@@ -275,3 +275,36 @@ def test_while_and_do_keywords():
     assert tokens[10].type == TokenType.IDENTIFIER
     assert tokens[10].value == "dowhile"
 
+
+def test_function_and_return_keywords():
+    """Verify recognition of FUNCTION, RETURNS, and RETURN keywords and compatibility with similar identifiers."""
+    code = "FUNCTION Calc RETURNS INTEGER RETURN result function returns return function_name returns_total return_val"
+    tokens = Lexer(code).tokenize()
+
+    assert tokens[0].type == TokenType.FUNCTION
+    assert tokens[0].value == "FUNCTION"
+    assert tokens[1].type == TokenType.IDENTIFIER
+    assert tokens[1].value == "Calc"
+    assert tokens[2].type == TokenType.RETURNS
+    assert tokens[2].value == "RETURNS"
+    assert tokens[3].type == TokenType.IDENTIFIER
+    assert tokens[3].value == "INTEGER"
+    assert tokens[4].type == TokenType.RETURN
+    assert tokens[4].value == "RETURN"
+    assert tokens[5].type == TokenType.IDENTIFIER
+    assert tokens[5].value == "result"
+
+    # Lowercase aliases
+    assert tokens[6].type == TokenType.FUNCTION
+    assert tokens[7].type == TokenType.RETURNS
+    assert tokens[8].type == TokenType.RETURN
+
+    # Identifiers containing function, returns, return
+    assert tokens[9].type == TokenType.IDENTIFIER
+    assert tokens[9].value == "function_name"
+    assert tokens[10].type == TokenType.IDENTIFIER
+    assert tokens[10].value == "returns_total"
+    assert tokens[11].type == TokenType.IDENTIFIER
+    assert tokens[11].value == "return_val"
+
+

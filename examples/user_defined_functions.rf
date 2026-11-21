@@ -1,0 +1,17 @@
+// Example: User-defined functions demonstrating calculation of bonus and square
+FUNCTION CalculateBonus(salary: DECIMAL, percentage: DECIMAL) RETURNS DECIMAL:
+    bonus = salary * percentage / 100
+    RETURN bonus
+END
+
+FUNCTION CalculateSquare(number: INTEGER) RETURNS INTEGER:
+    result = number * number
+    RETURN result
+END
+
+RULE EmployeeSalary:
+    salary = 50000
+    bonus = CalculateBonus(salary, 10)
+    square = CalculateSquare(8)
+    final_salary = salary + bonus
+END

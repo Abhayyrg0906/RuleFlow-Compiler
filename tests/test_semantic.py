@@ -611,3 +611,278 @@ def test_semantic_while_builtin_function_in_condition():
     assert table.lookup("diff").data_type == DataType.INTEGER
 
 
+# -------------------------------------------------------------
+# 11. User-Defined Functions Semantic Tests (Phase 7.4)
+# -------------------------------------------------------------
+
+def test_semantic_valid_function_declaration_and_call():
+    """Verify semantic validation of a valid function and its call in a rule."""
+    code = """
+    FUNCTION DoubleVal(x: INTEGER) RETURNS INTEGER:
+        res = x * 2
+        RETURN res
+    END
+
+    RULE Compute:
+        a = DoubleVal(10)
+    END
+    """
+    analyzer = parse_and_analyze(code)
+    assert "DoubleVal" in analyzer.function_symbols
+    func_sym = analyzer.function_symbols["DoubleVal"]
+    assert func_sym.return_type == DataType.INTEGER
+    assert len(func_sym.parameters) == 1
+    assert func_sym.parameters[0] == ("x", DataType.INTEGER)
+    assert analyzer.current_symbol_table.lookup("a").data_type == DataType.INTEGER
+
+
+def test_semantic_duplicate_function_name_rejected():
+    """Verify rejection of duplicate function definitions."""
+    code = """
+    FUNCTION Foo() RETURNS INTEGER:
+        RETURN 1
+    END
+
+    FUNCTION Foo() RETURNS INTEGER:
+        RETURN 2
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "Duplicate function name 'Foo'" in exc_info.value.message
+
+
+def test_semantic_builtin_collision_rejected():
+    """Verify that user-defined functions cannot shadow built-in functions."""
+    code = """
+    FUNCTION ABS(x: INTEGER) RETURNS INTEGER:
+        RETURN x
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "conflicts with built-in function" in exc_info.value.message
+
+
+def test_semantic_duplicate_parameter_rejected():
+    """Verify rejection of duplicate parameter names in function declaration."""
+    code = """
+    FUNCTION Add(a: INTEGER, a: INTEGER) RETURNS INTEGER:
+        RETURN a + a
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "Duplicate parameter 'a'" in exc_info.value.message
+
+
+def test_semantic_invalid_parameter_or_return_type():
+    """Verify rejection of unknown parameter or return types."""
+    code = """
+    FUNCTION Bad(a: UNKNOWN_TYPE) RETURNS INTEGER:
+        RETURN 1
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "Invalid type 'UNKNOWN_TYPE'" in exc_info.value.message
+
+
+def test_semantic_missing_return_statement():
+    """Verify rejection of a function with no RETURN statement."""
+    code = """
+    FUNCTION NoReturn(x: INTEGER) RETURNS INTEGER:
+        y = x + 1
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "missing a RETURN statement" in exc_info.value.message
+
+
+def test_semantic_multiple_return_statements_rejected():
+    """Verify rejection of multiple or non-terminal return statements."""
+    code = """
+    FUNCTION MultiReturn(x: INTEGER) RETURNS INTEGER:
+        RETURN x
+        y = 10
+        RETURN y
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "Multiple or conditional return paths" in exc_info.value.message
+
+
+def test_semantic_incompatible_return_type():
+    """Verify error when returned expression doesn't match declared return type."""
+    code = """
+    FUNCTION BadReturn() RETURNS INTEGER:
+        RETURN "not an integer"
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "incompatible type STRING" in exc_info.value.message
+
+
+def test_semantic_integer_to_decimal_widening_return():
+    """Verify that returning an INTEGER for a DECIMAL function is permitted via widening."""
+    code = """
+    FUNCTION GetDec() RETURNS DECIMAL:
+        RETURN 42
+    END
+
+    RULE CheckDec:
+        v = GetDec()
+    END
+    """
+    analyzer = parse_and_analyze(code)
+    assert analyzer.current_symbol_table.lookup("v").data_type == DataType.DECIMAL
+
+
+def test_semantic_integer_to_decimal_widening_argument():
+    """Verify that passing an INTEGER argument to a DECIMAL parameter is permitted via widening."""
+    code = """
+    FUNCTION Half(val: DECIMAL) RETURNS DECIMAL:
+        RETURN val / 2.0
+    END
+
+    RULE WideningArg:
+        res = Half(10)
+    END
+    """
+    analyzer = parse_and_analyze(code)
+    assert analyzer.current_symbol_table.lookup("res").data_type == DataType.DECIMAL
+
+
+def test_semantic_wrong_argument_count():
+    """Verify error when function call passes incorrect number of arguments."""
+    code = """
+    FUNCTION Add(a: INTEGER, b: INTEGER) RETURNS INTEGER:
+        RETURN a + b
+    END
+
+    RULE CallAdd:
+        x = Add(1)
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "Function 'Add' expects 2 argument(s), got 1" in exc_info.value.message
+
+
+def test_semantic_wrong_argument_type():
+    """Verify error when argument type cannot be converted to parameter type."""
+    code = """
+    FUNCTION Multiply(a: INTEGER, b: INTEGER) RETURNS INTEGER:
+        RETURN a * b
+    END
+
+    RULE CallMul:
+        x = Multiply(10, "string")
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "parameter 'b' expected INTEGER, got STRING" in exc_info.value.message
+
+
+def test_semantic_unknown_function_call():
+    """Verify error when calling an undefined function."""
+    code = """
+    RULE UnknownCall:
+        x = NonExistent(123)
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "Unknown function 'NonExistent'" in exc_info.value.message
+
+
+def test_semantic_function_local_scope_cannot_leak():
+    """Verify that variables defined inside a function cannot be accessed outside."""
+    code = """
+    FUNCTION Helper() RETURNS INTEGER:
+        secret_var = 999
+        RETURN secret_var
+    END
+
+    RULE RuleA:
+        res = Helper()
+        bad = secret_var
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "Undefined variable 'secret_var'" in exc_info.value.message
+
+
+def test_semantic_function_cannot_read_rule_variables():
+    """Verify that variables defined in a rule are not accessible inside a function."""
+    code = """
+    FUNCTION Broken() RETURNS INTEGER:
+        RETURN rule_level_var + 1
+    END
+
+    RULE RuleB:
+        rule_level_var = 100
+        res = Broken()
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "Undefined variable 'rule_level_var'" in exc_info.value.message
+
+
+def test_semantic_reject_self_recursion():
+    """Verify that recursive function calls are rejected."""
+    code = """
+    FUNCTION Factorial(n: INTEGER) RETURNS INTEGER:
+        ans = Factorial(n - 1)
+        RETURN ans
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "Recursive function call to 'Factorial' is not supported" in exc_info.value.message
+
+
+def test_semantic_reject_forward_declaration_or_mutual_calls():
+    """Verify that forward calls or mutual recursion are rejected due to declaration order."""
+    code = """
+    FUNCTION Alpha(x: INTEGER) RETURNS INTEGER:
+        RETURN Beta(x)
+    END
+
+    FUNCTION Beta(x: INTEGER) RETURNS INTEGER:
+        RETURN Alpha(x)
+    END
+    """
+    with pytest.raises(SemanticError) as exc_info:
+        parse_and_analyze(code)
+    assert "Unknown function 'Beta'" in exc_info.value.message
+
+
+def test_semantic_function_symbol_class():
+    """Verify FunctionSymbol attributes, dictionary conversion, and representation."""
+    from ruleflow.semantic.symbol_table import FunctionSymbol
+
+    sym = FunctionSymbol(
+        name="Compute",
+        parameters=[("val", DataType.INTEGER)],
+        return_type=DataType.DECIMAL,
+        line=5,
+        column=1,
+    )
+    assert sym.name == "Compute"
+    assert sym.return_type == DataType.DECIMAL
+    assert sym.parameters[0] == ("val", DataType.INTEGER)
+    d = sym.to_dict()
+    assert d["name"] == "Compute"
+    assert d["return_type"] == "DECIMAL"
+    assert d["parameters"] == [{"name": "val", "type": "INTEGER"}]
+    assert repr(sym).startswith("FunctionSymbol")
+
+
+
